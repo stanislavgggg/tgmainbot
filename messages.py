@@ -5,6 +5,21 @@ messages.py — все тексты воронки на 4 языках.
 
 # ─── Шаг 1: Крючок (сразу после /start) ──────────────────────────────────────
 HOOK = {
+    # Дефолт — английский (для всех неизвестных языков)
+    "default": (
+        "🎰 Hey.\n\n"
+        "I'm Valeria. I've been reading the market for 3 years — and I found something "
+        "most people miss.\n\n"
+        "It's not magic. It's reading what others don't. 📊\n\n"
+        "_Choose your language:_"
+    ),
+    "en": (
+        "🎰 Hey.\n\n"
+        "I'm Valeria. I've been reading the market for 3 years — and I found something "
+        "most people miss.\n\n"
+        "It's not magic. It's reading what others don't. 📊\n\n"
+        "_Choose your language:_"
+    ),
     "es": (
         "🎰 Oye.\n\n"
         "Soy Valeria. Llevo 3 años siguiendo el mercado — y encontré algo "
@@ -32,14 +47,6 @@ HOOK = {
         "ko vairākums ignorē.\n\n"
         "Tā nav maģija. Tas ir lasīt to, ko citi nelasa. 📊\n\n"
         "_Kādu valodu preferi?_"
-    ),
-    # Дефолт для неизвестных языков
-    "default": (
-        "🎰 Привет.\n\n"
-        "Я Валерия. Три года слежу за рынком — и нашла кое-что, "
-        "что большинство игнорирует.\n\n"
-        "Не магия. Просто читаю то, что другие не читают. 📊\n\n"
-        "_Выбери свой язык:_"
     ),
 }
 
