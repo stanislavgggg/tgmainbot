@@ -14,7 +14,37 @@ Re-engage (scheduler):
   24ч — REENGAGE_1 (если не подписался)
   48ч — REENGAGE_2 (если всё ещё не подписался)
 """
+# Добавить в самое начало bot.py — ДО всех импортов
 
+import sys
+import os
+import atexit
+
+# ── Защита от двойного запуска ─────────────────────────────────────────────
+LOCK_FILE = "bot.lock"
+
+def _check_lock():
+    if os.path.exists(LOCK_FILE):
+        try:
+            with open(LOCK_FILE, "r") as f:
+                old_pid = int(f.read().strip())
+            # Проверяем жив ли процесс
+            os.kill(old_pid, 0)
+            # Если дошли сюда — процесс жив
+            print(f"❌ Бот уже запущен (PID {old_pid}). Останавливаем.")
+            sys.exit(1)
+        except (ProcessLookupError, ValueError):
+            # Процесс мёртв — lock устарел, удаляем
+            os.remove(LOCK_FILE)
+
+    # Записываем свой PID
+    with open(LOCK_FILE, "w") as f:
+        f.write(str(os.getpid()))
+
+    # Удаляем lock при выходе
+    atexit.register(lambda: os.path.exists(LOCK_FILE) and os.remove(LOCK_FILE))
+
+_check_lock()
 import logging
 import asyncio
 import os
