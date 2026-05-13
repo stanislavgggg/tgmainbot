@@ -28,28 +28,28 @@ class State(str, Enum):
 # url — основной, extra_url — опциональный второй
 CHANNELS: dict[str, dict[str, dict]] = {
     "es": {
-        "betting":   {"url": "https://t.me/ApuestasGuru",  "extra_url": ""},
-        "casino":    {"url": "https://t.me/ApuestasGuru",  "extra_url": ""},
-        "nodeposit": {"url": "https://t.me/ApuestasGuru",  "extra_url": ""},
-        "exclusive": {"url": "https://t.me/ApuestasGuru",  "extra_url": ""},
+        "betting":   {"url": "https://t.me/ApuestasGuruES",  "extra_url": ""},
+        "casino":    {"url": "https://t.me/ApuestasGuruES",  "extra_url": ""},
+        "nodeposit": {"url": "https://t.me/ApuestasGuruES",  "extra_url": ""},
+        "exclusive": {"url": "https://t.me/ApuestasGuruES",  "extra_url": ""},
     },
     "hr": {
-        "betting":   {"url": "https://t.me/BetCroatia",   "extra_url": ""},
-        "casino":    {"url": "https://t.me/BetCroatia",   "extra_url": ""},
-        "nodeposit": {"url": "https://t.me/BetCroatia",   "extra_url": ""},
-        "exclusive": {"url": "https://t.me/BetCroatia",   "extra_url": ""},
+        "betting":   {"url": "https://t.me/Bet_Croatia",   "extra_url": ""},
+        "casino":    {"url": "https://t.me/Bet_Croatia",   "extra_url": ""},
+        "nodeposit": {"url": "https://t.me/Bet_Croatia",   "extra_url": ""},
+        "exclusive": {"url": "https://t.me/Bet_Croatia",   "extra_url": ""},
     },
     "lt": {
-        "betting":   {"url": "https://t.me/LuckyGuru",    "extra_url": ""},
-        "casino":    {"url": "https://t.me/LuckyGuru",    "extra_url": ""},
-        "nodeposit": {"url": "https://t.me/LuckyGuru",    "extra_url": ""},
-        "exclusive": {"url": "https://t.me/LuckyGuru",    "extra_url": ""},
+        "betting":   {"url": "https://t.me/luckycasinoguru",    "extra_url": ""},
+        "casino":    {"url": "https://t.me/luckycasinoguru",    "extra_url": ""},
+        "nodeposit": {"url": "https://t.me/luckycasinoguru",    "extra_url": ""},
+        "exclusive": {"url": "https://t.me/luckycasinoguru",    "extra_url": ""},
     },
     "lv": {
-        "betting":   {"url": "https://t.me/LuckyLatvia",  "extra_url": ""},
-        "casino":    {"url": "https://t.me/LuckyLatvia",  "extra_url": ""},
-        "nodeposit": {"url": "https://t.me/LuckyLatvia",  "extra_url": ""},
-        "exclusive": {"url": "https://t.me/LuckyLatvia",  "extra_url": ""},
+        "betting":   {"url": "https://t.me/luckylatviaan",  "extra_url": ""},
+        "casino":    {"url": "https://t.me/luckylatviaan",  "extra_url": ""},
+        "nodeposit": {"url": "https://t.me/luckylatviaan",  "extra_url": ""},
+        "exclusive": {"url": "https://t.me/luckylatviaan",  "extra_url": ""},
     },
 }
 
