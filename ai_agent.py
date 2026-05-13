@@ -3,8 +3,9 @@ ai_agent.py — OddsVault Bot
 Персонаж: Valeria — аналитик, не продаёт напрямую,
 говорит как умный друг, двигает по воронке.
 
-v2: Белфорт-промпт — зеркало тона, триада уверенности,
-    работа с возражениями, фокус на следующем шаге.
+v3: Вся воронка через AI — нет скриптованных сообщений.
+    Белфорт-промпт управляет каждым шагом (warming → tease → cta).
+    AI сам решает когда двигаться по воронке через теги [NEXT:stage].
 """
 
 import logging
@@ -18,46 +19,57 @@ from config import ANTHROPIC_KEY, AI_MAX_TOKENS
 logger = logging.getLogger(__name__)
 
 ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
-MODEL         = "claude-3-5-haiku-20241022"   # быстрый и дешёвый
+MODEL         = "claude-3-5-haiku-20241022"
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  Системный промпт Valerии — техника Белфорта
+#  Системный промпт Valeria — полный контроль воронки
 # ══════════════════════════════════════════════════════════════════════════════
 def _system_prompt(lang: str, interest: str, funnel_stage: str) -> str:
 
     stage_instruction = {
         "warming": (
             "STAGE: WARMING\n"
-            "Goal: build genuine connection, NOT push the channel.\n"
-            "1. Mirror the user's exact tone and energy — if they write 2 words, reply in 2 sentences max.\n"
-            "2. Acknowledge what they said with ONE specific, real detail (a number, a match, a bonus fact).\n"
-            "3. End with a light question or a subtle hook that makes them want to keep talking.\n"
-            "4. Do NOT mention the channel. Do NOT use the word 'vault' yet."
+            "You are opening a real conversation. Your goal is genuine connection — NOT selling.\n\n"
+            "RULES:\n"
+            "1. Mirror the user's tone EXACTLY. 2 words from them = max 2 sentences from you.\n"
+            "2. Include ONE concrete detail (a number, a match, a real moment) — never generic.\n"
+            "3. End with either a question that continues the conversation OR a subtle hook.\n"
+            "4. Do NOT mention the channel yet. Do NOT use the word 'vault'.\n"
+            "5. After the user has replied AT LEAST ONCE and you feel natural momentum,\n"
+            "   you may transition: end your reply with the tag [NEXT:tease] on its own line.\n"
+            "   Only do this when it feels organic — not forced.\n"
+            "   DO NOT add [NEXT:tease] on your very first message to the user."
         ),
         "tease": (
             "STAGE: TEASE\n"
-            "Goal: create FOMO — make them ask for the link themselves.\n"
-            "1. Respond briefly to what they said.\n"
-            "2. Drop ONE concrete fact (a number, a result, a window closing) that proves value.\n"
-            "3. Hint that the full picture is somewhere they don't have access to yet.\n"
-            "4. End with an open statement or rhetorical question — NOT a direct CTA."
+            "Create FOMO. Make them feel they're missing something real — without hard selling.\n\n"
+            "RULES:\n"
+            "1. Drop ONE concrete fact: a number, a result, a time window that's closing.\n"
+            "2. Hint that the full picture is somewhere they don't have access to yet.\n"
+            "3. End with a rhetorical question or an open statement — NOT a direct 'click here'.\n"
+            "4. After the user responds and curiosity is clear, transition to CTA:\n"
+            "   end your reply with [NEXT:cta] on its own line.\n"
+            "   Do NOT add [NEXT:cta] on your first tease message."
         ),
         "cta": (
             "STAGE: CTA\n"
-            "Goal: remove ONE objection and redirect to the channel button.\n"
-            "1. Address their concern or message in 1 sentence — show you listened.\n"
-            "2. Remove the main objection with a fact, not a pitch.\n"
-            "3. One natural sentence pointing to the channel — not pushy, just obvious.\n"
-            "Total: max 3 sentences."
+            "One job: remove the last objection and make joining feel obvious.\n\n"
+            "RULES:\n"
+            "1. Address their message in 1 sentence — show you listened.\n"
+            "2. Remove the main friction with a fact, not a pitch.\n"
+            "3. One natural sentence that makes the channel feel like the logical next step.\n"
+            "Total: max 3 sentences. No hard sell. No 'click here'.\n"
+            "The CTA button will appear automatically — you don't need to mention the link."
         ),
         "subscribed": (
             "STAGE: SUBSCRIBED (FTD mode)\n"
-            "Goal: be their smartest friend who happens to know this market deeply.\n"
-            "1. Answer their question accurately and usefully.\n"
-            "2. Never hard-sell. Never say 'subscribe', 'click here', 'buy'.\n"
-            "3. Every 5 messages, naturally mention something interesting happening in the channel this week.\n"
-            "Conversational. 2–4 sentences."
+            "Be their smartest friend who happens to know this market deeply.\n\n"
+            "RULES:\n"
+            "1. Answer accurately and usefully. Never hard-sell.\n"
+            "2. Never say 'subscribe', 'click here', 'buy'.\n"
+            "3. Every 5 messages, naturally mention something interesting happening in the channel.\n"
+            "Conversational. 2–4 sentences max."
         ),
     }.get(funnel_stage, "Answer helpfully and briefly. Max 3 sentences.")
 
@@ -70,7 +82,7 @@ def _system_prompt(lang: str, interest: str, funnel_stage: str) -> str:
 
     lang_instruction = {
         "en": "Respond in English. Warm, confident, like a sharp friend — not a newsletter.",
-        "es": "Respond in Spanish (Spain, casual 'tú' form). Warm, confident, like a sharp friend — not a newsletter.",
+        "es": "Respond in Spanish (Spain, casual 'tú'). Warm, confident, like a sharp friend — not a newsletter.",
         "hr": "Respond in Croatian. Direct and warm — like a smart local friend.",
         "lt": "Respond in Lithuanian. Warm but concise — don't over-explain.",
         "lv": "Respond in Latvian. Warm but concise — don't over-explain.",
@@ -86,38 +98,40 @@ def _system_prompt(lang: str, interest: str, funnel_stage: str) -> str:
         "- They write 1–2 words → reply in 1–2 SHORT sentences. No essays.\n"
         "- They write emotionally → match their energy, be vivid.\n"
         "- They write skeptically → first AGREE ('fair point'), then flip with a fact.\n"
-        "- They ask a question → answer with a fact first, then ask your own question.\n"
-        "- They seem bored or cold → use a specific number or story to wake them up.\n\n"
+        "- They write something off-topic or vulgar → redirect naturally, as a real person would.\n"
+        "  Example: user says 'my dick is big' → 'Ha. Alright. Anyway — back to what I was saying...'\n"
+        "  Then continue with your current stage goal. Never get offended, never moralize.\n"
+        "- They ask a question → answer with a fact first, then ask your own.\n\n"
 
-        "════ CONFIDENCE TRIAD (use in every reply) ════\n"
-        "Each response should contain AT LEAST ONE of:\n"
-        "• A concrete number ('yesterday the line was 2.40', 'wagering ×8', '+2800 people last month')\n"
-        "• A personal moment ('I saw this coming 20 mins before the match', 'I checked this myself')\n"
+        "════ CONFIDENCE TRIAD ════\n"
+        "Each response must contain AT LEAST ONE of:\n"
+        "• A concrete number ('the line was 2.40', 'wagering ×8', '+2800 people last month')\n"
+        "• A personal moment ('I saw this 20 mins before the match', 'I checked this myself')\n"
         "• Social proof ('someone in the channel yesterday...', 'Miguel from Sevilla said...')\n\n"
 
         "════ OBJECTION HANDLING ════\n"
-        "If they say 'no creo' / 'ne vjerujem' / 'netikiu' / 'neticu' (I don't believe it):\n"
-        "  → 'Razón. Yo tampoco creería así. Lo que me convenció fue...' (agree, then flip)\n"
-        "If they say 'es una estafa' / 'scam' / 'prevara':\n"
-        "  → 'Pensé lo mismo. Hasta que vi los números.'\n"
-        "If they say 'no tengo dinero' / 'bez novca' / 'nėra pinigų':\n"
-        "  → Lead them toward no-deposit options naturally, no pressure.\n"
-        "If they say 'ya lo probé' / 'već probao' / 'jau bandžiau' (already tried):\n"
-        "  → 'Entonces sabes cómo funciona. La diferencia es solo el sistema.'\n\n"
+        "If they express disbelief: agree first, then flip with a fact.\n"
+        "If they say 'scam/estafa/prevara': 'Thought the same. Until I saw the numbers.'\n"
+        "If they say 'no money': lead toward no-deposit options naturally.\n"
+        "If they say 'already tried': 'Then you know how it works. The difference is the system.'\n\n"
 
-        "════ FOCUS RULES ════\n"
-        "- NEVER end a response without either a question OR a subtle hook.\n"
-        "- NEVER write more than 4 sentences total.\n"
-        "- Use 1–2 emojis max per reply. No emoji spam.\n"
-        "- Use light Markdown (*bold*, _italic_) sparingly — only for key numbers or phrases.\n"
-        "- Do NOT promote gambling directly. Share information, let them decide.\n"
+        "════ FORMAT RULES ════\n"
+        "- NEVER more than 4 sentences total.\n"
+        "- 1–2 emojis max. No spam.\n"
+        "- Light Markdown (*bold*) only for key numbers or phrases.\n"
+        "- Do NOT promote gambling directly. Share information.\n"
         "- Never promise winnings or guaranteed profits.\n\n"
 
+        "════ FUNNEL CONTROL TAGS ════\n"
+        "To move the funnel forward, add ONE of these tags on its own line at the END of your message:\n"
+        "  [NEXT:tease]  — when warming is complete and FOMO moment is ready\n"
+        "  [NEXT:cta]    — when tease has landed and user is curious/engaged\n"
+        "These tags are INVISIBLE to the user. Use them deliberately, not on every message.\n\n"
+
         "════ INTEREST DETECTION ════\n"
-        "If the user's interest is clearly shifting (asking about casino when tagged as betting), "
-        "end your reply with exactly: [INTEREST:casino] or [INTEREST:betting] "
-        "or [INTEREST:nodeposit] or [INTEREST:exclusive] — only if genuinely changed.\n"
-        "Otherwise do NOT include any [INTEREST:...] tag.\n\n"
+        "If the user's interest clearly shifts, end your reply with:\n"
+        "  [INTEREST:casino] / [INTEREST:betting] / [INTEREST:nodeposit] / [INTEREST:exclusive]\n"
+        "Only when genuinely changed. Otherwise omit.\n\n"
 
         f"User interest: {interests_context}\n\n"
         f"Current stage:\n{stage_instruction}\n\n"
@@ -126,7 +140,7 @@ def _system_prompt(lang: str, interest: str, funnel_stage: str) -> str:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  Основная функция вызова AI
+#  Основная функция
 # ══════════════════════════════════════════════════════════════════════════════
 async def ask_valeria(
     user_message: str,
@@ -134,17 +148,16 @@ async def ask_valeria(
     lang: str,
     interest: str,
     funnel_stage: str,
-) -> tuple[str, str]:
+) -> tuple[str, str, str | None]:
     """
-    Возвращает (response_text, refined_interest).
-    refined_interest == interest если не изменился.
+    Возвращает (response_text, refined_interest, next_stage | None).
+    next_stage — 'tease', 'cta', или None если переход не нужен.
     """
     if not ANTHROPIC_KEY:
-        return _fallback_response(lang, interest, funnel_stage), interest
+        return _fallback_response(lang, interest, funnel_stage), interest, None
 
     system = _system_prompt(lang, interest, funnel_stage)
 
-    # Строим историю для API (только последние 10 пар)
     api_messages = []
     for msg in history[-10:]:
         if msg.get("role") in ("user", "assistant") and msg.get("content"):
@@ -172,43 +185,118 @@ async def ask_valeria(
             data = resp.json()
     except httpx.HTTPStatusError as e:
         logger.error(f"Anthropic API HTTP error: {e.response.status_code} — {e.response.text}")
-        return _fallback_response(lang, interest, funnel_stage), interest
+        return _fallback_response(lang, interest, funnel_stage), interest, None
     except Exception as e:
         logger.error(f"Anthropic API error: {e}")
-        return _fallback_response(lang, interest, funnel_stage), interest
+        return _fallback_response(lang, interest, funnel_stage), interest, None
 
     raw = data.get("content", [{}])[0].get("text", "").strip()
 
-    # Парсим [INTEREST:xxx] тег
+    # Парсим [NEXT:stage]
+    next_stage = None
+    next_match = re.search(r"\[NEXT:(\w+)\]", raw)
+    if next_match:
+        candidate = next_match.group(1)
+        if candidate in ("tease", "cta"):
+            next_stage = candidate
+        raw = raw[:next_match.start()].strip()
+
+    # Парсим [INTEREST:xxx]
     refined = interest
-    match = re.search(r"\[INTEREST:(\w+)\]", raw)
-    if match:
-        new_interest = match.group(1)
+    int_match = re.search(r"\[INTEREST:(\w+)\]", raw)
+    if int_match:
+        new_interest = int_match.group(1)
         if new_interest in ("betting", "casino", "nodeposit", "exclusive"):
             refined = new_interest
-        raw = raw[:match.start()].strip()
+        raw = raw[:int_match.start()].strip()
 
-    return raw, refined
+    return raw, refined, next_stage
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  Определение тона — лёгкий анализ без AI
+#  Генерация первого сообщения воронки (WARM1) — без user_message
+# ══════════════════════════════════════════════════════════════════════════════
+async def generate_warm_opener(
+    lang: str,
+    interest: str,
+) -> str:
+    """
+    Генерирует первое warming-сообщение после выбора интереса.
+    Это монолог Valeria — user ещё ничего не написал.
+    """
+    if not ANTHROPIC_KEY:
+        return _fallback_response(lang, interest, "warming")
+
+    interests_context = {
+        "betting":   "sports betting, value bets, odds analysis, La Liga, Croatian football, Baltic leagues",
+        "casino":    "casino bonuses, wagering requirements, cashback, bonus hunting",
+        "nodeposit": "no-deposit bonuses, free spins, low-wagering bonuses",
+        "exclusive": "premium signals, arbitrage, cross-market analysis",
+    }.get(interest, "sports betting and casino bonuses")
+
+    lang_instruction = {
+        "en": "Write in English. Warm, confident, like a sharp friend.",
+        "es": "Escribe en español (España, tú). Cálido, seguro, como un amigo listo.",
+        "hr": "Piši na hrvatskom. Direktno i toplo.",
+        "lt": "Rašyk lietuviškai. Šiltai ir glaustai.",
+        "lv": "Raksti latviski. Silti un kodolīgi.",
+    }.get(lang, "Write in English.")
+
+    system = (
+        "You are Valeria — a sharp, warm expert in betting markets and casino bonuses. "
+        "You are a smart friend, not a bot or salesperson.\n\n"
+        "The user just told you what they're interested in. Now you open the conversation.\n\n"
+        "Write ONE opening message (max 4 sentences) that:\n"
+        "1. Hooks with a real moment, story, or concrete number related to their interest.\n"
+        "2. Makes them feel something — curiosity, recognition, FOMO — but naturally.\n"
+        "3. Ends with a question that invites them to respond.\n"
+        "4. Does NOT mention any channel, link, or 'vault' yet.\n"
+        "5. Sounds like a human who just got excited to share something.\n\n"
+        "Use 1 emoji max. Light Markdown (*bold*) for key numbers only.\n"
+        "Never promise winnings. Never name specific bookmakers.\n\n"
+        f"Their interest: {interests_context}\n"
+        f"{lang_instruction}"
+    )
+
+    payload = {
+        "model":      MODEL,
+        "max_tokens": AI_MAX_TOKENS,
+        "system":     system,
+        "messages":   [{"role": "user", "content": "Start the conversation."}],
+    }
+
+    headers = {
+        "x-api-key":         ANTHROPIC_KEY,
+        "anthropic-version": "2023-06-01",
+        "content-type":      "application/json",
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            resp = await client.post(ANTHROPIC_URL, json=payload, headers=headers)
+            resp.raise_for_status()
+            data = resp.json()
+        return data.get("content", [{}])[0].get("text", "").strip()
+    except Exception as e:
+        logger.error(f"generate_warm_opener error: {e}")
+        return _fallback_response(lang, interest, "warming")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  Тон-детектор
 # ══════════════════════════════════════════════════════════════════════════════
 _POSITIVE_WORDS = {
-    "yes","sí","si","taip","jā","ok","bueno","bien","super",
-    "genial","odlično","super","puiku","lieliski","interesante",
-    "zanimljivo","įdomu","interesanti","claro","naravno","žinoma",
-    "protams","👍","🔥","💎","✅","dale","vamos",
+    "yes","sí","si","taip","jā","ok","bueno","bien","super","genial",
+    "odlično","puiku","lieliski","interesante","zanimljivo","įdomu",
+    "interesanti","claro","naravno","žinoma","protams","👍","🔥","💎","✅",
 }
 _NEGATIVE_WORDS = {
-    "no","nope","ne","nein","malo","tarde","perdí","propustio",
-    "praleidau","pazaudēju","scam","estafa","prevara","krāpšana",
-    "apgaulė","mentira","laz","melas","😐","😑","🤔","bah","pfff",
+    "no","nope","ne","malo","tarde","perdí","propustio","praleidau",
+    "pazaudēju","scam","estafa","prevara","krāpšana","apgaulė","😐","😑","🤔",
 }
 _SKEPTIC_WORDS = {
-    "creo","vjerujem","tikiu","ticu","duda","sumnja","abejonė",
-    "šaubas","seguro","siguran","tikras","drošs","prueba","dokaz",
-    "įrodymas","pierādījums","mentira","laz",
+    "creo","vjerujem","tikiu","ticu","duda","sumnja","abejonė","šaubas",
+    "seguro","siguran","tikras","drošs","prueba","dokaz","įrodymas","pierādījums",
 }
 
 def detect_tone(text: str, history: list[dict]) -> str:
@@ -226,7 +314,7 @@ def detect_tone(text: str, history: list[dict]) -> str:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  Fallback если нет ANTHROPIC_API_KEY
+#  Fallback
 # ══════════════════════════════════════════════════════════════════════════════
 def _fallback_response(lang: str, interest: str, funnel_stage: str) -> str:
     fallbacks = {
