@@ -47,7 +47,6 @@ def _check_lock():
 _check_lock()
 import logging
 import asyncio
-import os
 import random
 from datetime import datetime, timezone
 
