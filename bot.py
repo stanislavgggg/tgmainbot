@@ -18,6 +18,7 @@ Re-engage (scheduler):
 import logging
 import asyncio
 import os
+import random
 from datetime import datetime, timezone
 
 from telegram import (
@@ -36,9 +37,13 @@ from telegram.ext import (
 from telegram.constants import ParseMode
 from telegram.error import TelegramError
 
-from config import BOT_TOKEN, CHANNELS, State, REENGAGE_DELAY_1, REENGAGE_DELAY_2
+from config import (
+    BOT_TOKEN, CHANNELS, State,
+    REENGAGE_DELAY_1, REENGAGE_DELAY_2,
+    INTEREST_IMAGES,
+)
 from storage import get_user, update_user, add_ai_message, get_all_users
-from ai_agent import ask_valeria
+from ai_agent import ask_valeria, detect_tone
 import messages as M
 
 logging.basicConfig(
@@ -51,6 +56,45 @@ logger = logging.getLogger(__name__)
 async def _typing_delay(context, chat_id: int, seconds: float = 1.5):
     await context.bot.send_chat_action(chat_id, "typing")
     await asyncio.sleep(seconds)
+
+
+# ── Отправка случайной картинки по интересу ────────────────────────────────────
+async def _send_image(
+    context: ContextTypes.DEFAULT_TYPE,
+    chat_id: int,
+    interest: str,
+    caption: str = None,
+) -> bool:
+    """
+    Отправляет случайную картинку по интересу.
+    Возвращает True если успешно, False если картинок нет / ошибка.
+    """
+    images = INTEREST_IMAGES.get(interest, [])
+
+    # Фолбэк на betting если нет картинок для интереса
+    if not images:
+        images = INTEREST_IMAGES.get("betting", [])
+
+    if not images:
+        return False
+
+    img_path = random.choice(images)
+
+    try:
+        with open(img_path, "rb") as photo:
+            await context.bot.send_photo(
+                chat_id=chat_id,
+                photo=photo,
+                caption=caption,
+                parse_mode=ParseMode.MARKDOWN if caption else None,
+            )
+        return True
+    except FileNotFoundError:
+        logger.warning(f"Image not found: {img_path}")
+        return False
+    except TelegramError as e:
+        logger.warning(f"Failed to send image: {e}")
+        return False
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -69,7 +113,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         username=username,
     )
 
-    # Всегда показываем английский крючок — дефолтный язык интерфейса
     hook_text = M.HOOK["default"]
 
     keyboard = [[InlineKeyboardButton(label, callback_data=cb)] for label, cb in M.LANG_BUTTONS]
@@ -119,13 +162,11 @@ async def interest_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     warm1_text = M.get(M.WARM1, lang, interest)
 
-    # Убираем кнопки квиза
     await query.edit_message_text(
         text=warm1_text,
         parse_mode=ParseMode.MARKDOWN,
     )
 
-    # Через 2.5с отправляем WARM2
     await _typing_delay(context, query.message.chat_id, 2.5)
     await _send_warm2(context.bot, user_id, query.message.chat_id, lang, interest)
 
@@ -140,7 +181,6 @@ async def _send_warm2(bot, user_id: int, chat_id: int, lang: str, interest: str)
         parse_mode=ParseMode.MARKDOWN,
     )
 
-    # Через 3с отправляем тизер
     await asyncio.sleep(3)
     await _send_tease(bot, user_id, chat_id, lang, interest)
 
@@ -155,7 +195,6 @@ async def _send_tease(bot, user_id: int, chat_id: int, lang: str, interest: str)
         parse_mode=ParseMode.MARKDOWN,
     )
 
-    # Через 2с отправляем CTA
     await asyncio.sleep(2)
     await _send_cta(bot, user_id, chat_id, lang, interest)
 
@@ -172,7 +211,6 @@ async def _send_cta(bot, user_id: int, chat_id: int, lang: str, interest: str):
         [InlineKeyboardButton(joined_label, callback_data="user_joined")],
     ]
 
-    # Текст-тизер уже отправлен, просто добавляем кнопки отдельным сообщением
     await bot.send_message(
         chat_id=chat_id,
         text="👇",
@@ -190,17 +228,17 @@ async def user_joined(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     user_id = query.from_user.id
     user = get_user(user_id)
     lang = user.get("lang", "es")
+    interest = user.get("interest", "betting")
 
     update_user(user_id, state=State.SUBSCRIBED, funnel_stage="subscribed")
 
-    post_text = M.get(M.POST_SUB, lang)
+    post_text = M.get(M.POST_SUB, lang, interest)
 
     await query.edit_message_text(
         text=post_text,
         parse_mode=ParseMode.MARKDOWN,
     )
 
-    # Переводим в режим AI-чата
     update_user(user_id, state=State.AI_CHAT)
 
 
@@ -215,28 +253,26 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     user = get_user(user_id)
     state = user.get("state")
 
-    # Если пользователь ещё не прошёл воронку — игнорируем / отправляем на /start
     if state not in (State.AI_CHAT, State.SUBSCRIBED, None):
         return
 
-    # Если совсем новый — запускаем start
     if state is None:
         await start(update, context)
         return
 
-    lang = user.get("lang", "es")
-    interest = user.get("interest", "betting")
+    lang         = user.get("lang", "es")
+    interest     = user.get("interest", "betting")
     funnel_stage = user.get("funnel_stage", "subscribed")
-    history = user.get("ai_history", [])
-    user_text = update.message.text.strip()
+    history      = user.get("ai_history", [])
+    msg_count    = user.get("ai_msg_count", 0)
+    user_text    = update.message.text.strip()
 
-    # Сохраняем сообщение пользователя
     add_ai_message(user_id, "user", user_text)
 
-    # Индикатор печати
     await context.bot.send_chat_action(update.effective_chat.id, "typing")
 
-    response = await ask_valeria(
+    # Получаем ответ + уточнённый интерес
+    response, refined_interest = await ask_valeria(
         user_message=user_text,
         history=history,
         lang=lang,
@@ -244,8 +280,59 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         funnel_stage=funnel_stage,
     )
 
+    new_msg_count = msg_count + 1
+
+    # Обновляем данные пользователя
+    update_kwargs = {"ai_msg_count": new_msg_count}
+    if refined_interest != interest:
+        update_kwargs["interest"] = refined_interest
+        logger.info(f"User {user_id}: interest {interest} → {refined_interest}")
+    update_user(user_id, **update_kwargs)
+
     add_ai_message(user_id, "assistant", response)
 
+    # Сохраняем тон
+    tone = detect_tone(user_text, history)
+    logger.debug(f"User {user_id}: tone={tone}")
+
+    # ── FTD-пуш каждые 5 сообщений у подписанных ──────────────────────────────
+    FTD_PUSH_EVERY = 5
+    if funnel_stage == "subscribed" and new_msg_count % FTD_PUSH_EVERY == 0:
+        ftd_text = M.get(M.POST_SUB, lang, refined_interest)
+        if ftd_text:
+            await asyncio.sleep(1.5)
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text=ftd_text,
+                parse_mode=ParseMode.MARKDOWN,
+            )
+            return
+
+    # ── Пуш при смене интереса ─────────────────────────────────────────────────
+    if refined_interest != interest:
+        shift_key = f"{interest}_to_{refined_interest}"
+        shift_msg = M.INTEREST_SHIFT.get(shift_key, {}).get(lang)
+        if shift_msg:
+            await update.message.reply_text(
+                shift_msg,
+                parse_mode=ParseMode.MARKDOWN,
+            )
+            return
+
+    # ── Каждые 4 сообщения отправляем картинку с текстом ──────────────────────
+    IMAGE_EVERY_N = 4
+    if new_msg_count % IMAGE_EVERY_N == 0:
+        sent = await _send_image(
+            context=context,
+            chat_id=update.effective_chat.id,
+            interest=refined_interest,
+            caption=response,
+        )
+        if sent:
+            return
+        # Если картинок нет — падаем в обычный текст
+
+    # ── Обычный текстовый ответ ────────────────────────────────────────────────
     await update.message.reply_text(
         response,
         parse_mode=ParseMode.MARKDOWN,
@@ -265,11 +352,9 @@ async def reengage_job(context: ContextTypes.DEFAULT_TYPE) -> None:
         lang = user.get("lang", "es")
         interest = user.get("interest", "betting")
 
-        # Пропускаем подписавшихся
         if funnel_stage == "subscribed":
             continue
 
-        # Пропускаем тех, кто не дошёл до CTA
         if funnel_stage not in ("cta", "tease", "warming"):
             continue
 
@@ -279,7 +364,6 @@ async def reengage_job(context: ContextTypes.DEFAULT_TYPE) -> None:
 
         try:
             last_active = datetime.fromisoformat(last_active_str)
-            # Если без timezone — считаем UTC
             if last_active.tzinfo is None:
                 last_active = last_active.replace(tzinfo=timezone.utc)
             elapsed = now - last_active.timestamp()
@@ -350,15 +434,13 @@ def main() -> None:
     token = os.getenv("BOT_TOKEN", BOT_TOKEN)
     app = Application.builder().token(token).build()
 
-    # Handlers
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
-    app.add_handler(CallbackQueryHandler(lang_chosen,      pattern=r"^lang_"))
-    app.add_handler(CallbackQueryHandler(interest_chosen,  pattern=r"^int_"))
-    app.add_handler(CallbackQueryHandler(user_joined,      pattern=r"^user_joined$"))
+    app.add_handler(CallbackQueryHandler(lang_chosen,     pattern=r"^lang_"))
+    app.add_handler(CallbackQueryHandler(interest_chosen, pattern=r"^int_"))
+    app.add_handler(CallbackQueryHandler(user_joined,     pattern=r"^user_joined$"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    # Re-engage планировщик: каждые 30 минут
     job_queue = app.job_queue
     job_queue.run_repeating(reengage_job, interval=30 * 60, first=60)
 
