@@ -142,7 +142,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         username=username,
     )
 
-    hook_text = M.HOOK["default"]
+    hook_text = M.HOOK["en"]
 
     keyboard = [[InlineKeyboardButton(label, callback_data=cb)] for label, cb in M.LANG_BUTTONS]
 
