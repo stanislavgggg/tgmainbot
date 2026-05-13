@@ -4,48 +4,55 @@ messages.py — все тексты воронки на 4 языках.
 """
 
 # ─── Шаг 1: Крючок (сразу после /start) ──────────────────────────────────────
+#
+# ЧТО ИЗМЕНЕНО И ПОЧЕМУ:
+# Было: абстрактное "я читаю рынок уже 3 года" — звучит как резюме.
+# Стало: конкретный момент-триггер. Человек чувствует что пропустил что-то
+# реальное и ценное. Эмоция = FOMO + любопытство + лёгкое превосходство
+# ("есть те, кто знает — и ты можешь быть среди них").
+# Никакого слова "казино" / "ставки" в лоб — только ощущение инсайда.
+#
 HOOK = {
-    # Дефолт — английский (для всех неизвестных языков)
     "default": (
-        "🎰 Hey.\n\n"
-        "I'm Valeria. I've been reading the market for 3 years — and I found something "
-        "most people miss.\n\n"
-        "It's not magic. It's reading what others don't. 📊\n\n"
-        "_Choose your language:_"
+        "🔥 Last night something happened.\n\n"
+        "A match no one was watching. The odds were *wrong* — and a few people "
+        "who knew where to look walked away very happy.\n\n"
+        "I'm Valeria. I find these moments before they disappear. 🎯\n\n"
+        "_Pick your language:_"
     ),
     "en": (
-        "🎰 Hey.\n\n"
-        "I'm Valeria. I've been reading the market for 3 years — and I found something "
-        "most people miss.\n\n"
-        "It's not magic. It's reading what others don't. 📊\n\n"
-        "_Choose your language:_"
+        "🔥 Last night something happened.\n\n"
+        "A match no one was watching. The odds were *wrong* — and a few people "
+        "who knew where to look walked away very happy.\n\n"
+        "I'm Valeria. I find these moments before they disappear. 🎯\n\n"
+        "_Pick your language:_"
     ),
     "es": (
-        "🎰 Oye.\n\n"
-        "Soy Valeria. Llevo 3 años siguiendo el mercado — y encontré algo "
-        "que la mayoría ignora.\n\n"
-        "No es magia. Es leer lo que otros no leen. 📊\n\n"
+        "🔥 Anoche pasó algo.\n\n"
+        "Un partido que nadie vigilaba. Las cuotas estaban *mal calculadas* — "
+        "y los pocos que sabían dónde mirar salieron muy contentos.\n\n"
+        "Soy Valeria. Encuentro estos momentos antes de que desaparezcan. 🎯\n\n"
         "_¿Qué idioma prefieres?_"
     ),
     "hr": (
-        "🎰 Hej.\n\n"
-        "Ja sam Valerija. Tri godine pratim tržište — i pronašla sam nešto "
-        "što većina ignorira.\n\n"
-        "Nije magija. To je čitanje onoga što drugi ne čitaju. 📊\n\n"
+        "🔥 Sinoć se nešto dogodilo.\n\n"
+        "Utakmica koju nitko nije pratio. Kvote su bile *pogrešne* — "
+        "i nekolicina koji su znali gdje gledati izašla je vrlo zadovoljna.\n\n"
+        "Ja sam Valerija. Pronalazim te trenutke prije nego nestanu. 🎯\n\n"
         "_Koji jezik preferiraš?_"
     ),
     "lt": (
-        "🎰 Ei.\n\n"
-        "Aš esu Valerija. Trejus metus seku rinką — ir radau tai, "
-        "ką dauguma ignoruoja.\n\n"
-        "Tai ne magija. Tai skaityti tai, ko kiti neskaito. 📊\n\n"
+        "🔥 Vakar vakare kažkas nutiko.\n\n"
+        "Rungtynės, kurių niekas nestebėjo. Koeficientai buvo *neteisingi* — "
+        "ir keletas žmonių, žinojusių kur žiūrėti, išėjo labai laimingi.\n\n"
+        "Aš esu Valerija. Randu šias akimirkas prieš joms išnykstant. 🎯\n\n"
         "_Kokią kalbą renkiesi?_"
     ),
     "lv": (
-        "🎰 Hei.\n\n"
-        "Es esmu Valerija. Trīs gadus seku tirgum — un atradu ko tādu, "
-        "ko vairākums ignorē.\n\n"
-        "Tā nav maģija. Tas ir lasīt to, ko citi nelasa. 📊\n\n"
+        "🔥 Pagājušajā naktī kaut kas notika.\n\n"
+        "Spēle, ko neviens nesekoja. Koeficienti bija *nepareizi* — "
+        "un daži cilvēki, kas zināja kur skatīties, aizgāja ļoti priecīgi.\n\n"
+        "Es esmu Valerija. Atklāju šos mirkļus pirms tie pazūd. 🎯\n\n"
         "_Kādu valodu preferi?_"
     ),
 }
@@ -59,12 +66,18 @@ LANG_BUTTONS = [
 ]
 
 # ─── Шаг 2: Квиз — что тебя цепляет? ─────────────────────────────────────────
+#
+# ЧТО ИЗМЕНЕНО И ПОЧЕМУ:
+# Было: нейтральное "что тебя больше интересует?"
+# Стало: вопрос с интригой — "где ты чуешь запах денег?" — уже создаёт
+# ощущение что это про реальные возможности, а не просто опрос.
+#
 QUIZ = {
-    "es": "¿Qué te engancha más? 👇",
-    "hr": "Što te više zanima? 👇",
-    "lt": "Kas tave labiau domina? 👇",
-    "lv": "Kas tevi vairāk interesē? 👇",
-    "default": "Что тебя больше цепляет? 👇",
+    "es": "¿Dónde hueles el dinero? 👇",
+    "hr": "Gdje osjećaš miris novca? 👇",
+    "lt": "Kur užuodi pinigų kvapą? 👇",
+    "lv": "Kur tu saož naudu? 👇",
+    "default": "Где чуешь запах денег? 👇",
 }
 
 QUIZ_BUTTONS = {
@@ -95,138 +108,148 @@ QUIZ_BUTTONS = {
 }
 
 # ─── Шаг 3: Прогрев 1 — личная история ───────────────────────────────────────
+#
+# ЧТО ИЗМЕНЕНО И ПОЧЕМУ:
+# Было: спокойный рассказ про "анализ" и "статистику" — звучит как лекция.
+# Стало: короткая история с конкретным исходом ("заработала") + эмоция
+# от момента. Читатель должен почувствовать что Валерия живёт этим,
+# это не теория — а реальный азарт и реальный результат.
+#
 WARM1 = {
     "betting": {
         "es": (
-            "⚽ Ayer analicé 6 partidos. Solo aposté en 2.\n\n"
-            "La clave no es apostar mucho — es esperar el momento donde las cuotas "
-            "no reflejan la realidad. Eso pasa más seguido de lo que crees.\n\n"
-            "Yo llevo mis propias estadísticas desde hace 2 años. 📋"
+            "⚽ Ayer vi una cuota que me llamó la atención a las 11 de la noche.\n\n"
+            "Nadie la estaba mirando. El mercado se equivocó — yo no.\n\n"
+            "No siempre sale. Pero cuando sale… ese feeling no tiene precio. 🔥"
         ),
         "hr": (
-            "⚽ Jučer sam analizirala 6 utakmica. Kladila se samo na 2.\n\n"
-            "Ključ nije klađenje puno — nego čekanje trenutka kad kvote "
-            "ne odražavaju stvarnost. To se dogodi češće nego misliš.\n\n"
-            "Vodim vlastitu statistiku već 2 godine. 📋"
+            "⚽ Jučer sam u 23h vidjela kvotu koja me zaustavila.\n\n"
+            "Nitko je nije gledao. Tržište se prevarilo — ja nisam.\n\n"
+            "Ne uspijeva uvijek. Ali kad uspije… taj osjećaj nema cijenu. 🔥"
         ),
         "lt": (
-            "⚽ Vakar analizavau 6 rungtynes. Lažinausi tik iš 2.\n\n"
-            "Raktas — ne daug lažintis, o laukti momento, kai koeficientai "
-            "neatspindi realybės. Tai nutinka dažniau nei manai.\n\n"
-            "Pati vedu statistiką jau 2 metus. 📋"
+            "⚽ Vakar vakare 23 val. pamačiau koeficientą, kuris sustabdė mane.\n\n"
+            "Niekas jo nestebėjo. Rinka suklydo — aš ne.\n\n"
+            "Ne visada pavyksta. Bet kai pavyksta… tas jausmas neįkainojamas. 🔥"
         ),
         "lv": (
-            "⚽ Vakar analizēju 6 spēles. Derēju tikai uz 2.\n\n"
-            "Atslēga nav daudz derēt — bet gaidīt mirkli, kad koeficienti "
-            "neatbilst realitātei. Tas notiek biežāk nekā domā.\n\n"
-            "Pati vedu statistiku jau 2 gadus. 📋"
+            "⚽ Vakar pulksten 23 redzēju koeficientu, kas mani apturēja.\n\n"
+            "Neviens to nesekoja. Tirgus kļūdījās — es ne.\n\n"
+            "Ne vienmēr izdodas. Bet kad izdodas… tas sajūta nav ar naudu novērtējama. 🔥"
         ),
     },
     "casino": {
         "es": (
-            "🎰 La mayoría entra al casino sin entender los bonos.\n\n"
-            "Hay plataformas donde el bono de bienvenida tiene wagering x20 "
-            "— y otras donde es x5. Esa diferencia lo cambia todo.\n\n"
-            "Yo reviso los T&C antes de registrarme en cualquier sitio. 🔍"
+            "🎰 El casino siempre gana — si juegas como todo el mundo.\n\n"
+            "Pero hay bonos donde la matemática está del lado del jugador. "
+            "Por 20 minutos. Si sabes cuáles y cómo usarlos.\n\n"
+            "Yo los busco cada semana. Y los encuentro. 🔍"
         ),
         "hr": (
-            "🎰 Većina ulazi u casino bez razumijevanja bonusa.\n\n"
-            "Ima platforma gdje bonus dobrodošlice ima wagering x20 "
-            "— a drugdje x5. Ta razlika mijenja sve.\n\n"
-            "Uvijek čitam uvjete prije registracije. 🔍"
+            "🎰 Casino uvijek pobjeđuje — ako igraš kao svi.\n\n"
+            "Ali postoje bonusi gdje matematika stoji na strani igrača. "
+            "Na 20 minuta. Ako znaš koje i kako ih koristiti.\n\n"
+            "Tražim ih svaki tjedan. I pronalazim ih. 🔍"
         ),
         "lt": (
-            "🎰 Dauguma žmonių eina į kazino nesuprasdami bonusų.\n\n"
-            "Yra platformų, kur sveikinamasis bonusas turi wagering x20 "
-            "— kitur x5. Tas skirtumas keičia viską.\n\n"
-            "Visada skaitau sąlygas prieš registruodamasi. 🔍"
+            "🎰 Kazino visada laimi — jei žaidi kaip visi.\n\n"
+            "Bet yra bonusų, kur matematika stovi žaidėjo pusėje. "
+            "20 minučių. Jei žinai kuriuos ir kaip juos naudoti.\n\n"
+            "Ieškau jų kiekvieną savaitę. Ir randu. 🔍"
         ),
         "lv": (
-            "🎰 Vairums cilvēku iet kazino nesaprotot bonusus.\n\n"
-            "Ir platformas ar wagering x20 — un citas ar x5. "
-            "Šī atšķirība maina visu.\n\n"
-            "Vienmēr lasu noteikumus pirms reģistrācijas. 🔍"
+            "🎰 Kazino vienmēr uzvar — ja spēlē kā visi.\n\n"
+            "Bet ir bonusi, kur matemātika stāv spēlētāja pusē. "
+            "20 minūtes. Ja zini kurus un kā tos izmantot.\n\n"
+            "Meklēju tos katru nedēļu. Un atklāju. 🔍"
         ),
     },
     "nodeposit": {
         "es": (
-            "🎁 Hay bonos sin depósito que casi nadie conoce.\n\n"
-            "No los anuncian en la página principal — los encuentras si sabes "
-            "dónde buscar. Yo tengo una lista actualizada cada semana.\n\n"
-            "Esta semana encontré 3 que tienen sentido real. ✅"
+            "🎁 Esta mañana me registré en una plataforma nueva.\n\n"
+            "Sin depositar nada — me dieron 15€ para jugar. "
+            "La mayoría ni sabe que existen estas ofertas.\n\n"
+            "Yo llevo una lista. La actualizo cuando encuentro algo real. ✅"
         ),
         "hr": (
-            "🎁 Postoje bonusi bez depozita koje gotovo nitko ne zna.\n\n"
-            "Ne oglašavaju ih na glavnoj stranici — pronađeš ih ako znaš "
-            "gdje tražiti. Ja imam listu koja se ažurira svaki tjedan.\n\n"
-            "Ovaj tjedan pronašla sam 3 koje imaju smisla. ✅"
+            "🎁 Jutros sam se registrirala na novoj platformi.\n\n"
+            "Bez uplate — dali su mi 15€ za igranje. "
+            "Većina ni ne zna da postoje takve ponude.\n\n"
+            "Vodim popis. Ažuriram ga kad nađem nešto stvarno. ✅"
         ),
         "lt": (
-            "🎁 Yra bonusų be depozito, kuriuos beveik niekas nežino.\n\n"
-            "Jie nereklamuojami pagrindiniame puslapyje — randi, jei žinai "
-            "kur ieškoti. Turiu sąrašą, atnaujinamą kas savaitę.\n\n"
-            "Šią savaitę radau 3, kurie tikrai prasmingi. ✅"
+            "🎁 Šiandien rytą užsiregistravau naujoje platformoje.\n\n"
+            "Nieko neįmokėjus — davė man 15€ žaidimui. "
+            "Dauguma net nežino, kad tokių pasiūlymų egzistuoja.\n\n"
+            "Turiu sąrašą. Atnaujinu jį kai randu ką tikrai verta. ✅"
         ),
         "lv": (
-            "🎁 Ir bonusi bez depozīta, kurus gandrīz neviens nezina.\n\n"
-            "Tos nereklamē galvenajā lapā — atrod, ja zini kur meklēt. "
-            "Man ir saraksts, kas atjaunināts katru nedēļu.\n\n"
-            "Šonedēļ atradu 3, kas tiešām ir vērtīgi. ✅"
+            "🎁 Šorīt reģistrējos jaunā platformā.\n\n"
+            "Neko neiemaksājot — deva man 15€ spēlēšanai. "
+            "Vairākums pat nezina, ka šādi piedāvājumi eksistē.\n\n"
+            "Man ir saraksts. Atjauninu to kad atklāju ko patiešām vērtu. ✅"
         ),
     },
     "exclusive": {
         "es": (
-            "🔥 Esta semana vi algo interesante en el mercado.\n\n"
-            "Las cuotas en un partido específico estaban claramente desajustadas "
-            "respecto al histórico. Poca gente lo notó.\n\n"
-            "Ese tipo de situaciones son las que yo busco. 🎯"
+            "🔥 Hay un tipo de situación en el mercado que casi nunca se habla.\n\n"
+            "Cuando dos bookmakers calculan diferente el mismo evento — "
+            "existe una ventana. Pequeña. Pero existe.\n\n"
+            "Yo la busco. Y cuando aparece, la comparto antes que se cierre. ⚡"
         ),
         "hr": (
-            "🔥 Ovaj tjedan vidio sam nešto zanimljivo na tržištu.\n\n"
-            "Kvote na jednoj utakmici bile su jasno neusklađene s poviješću. "
-            "Malo tko je to primijetio.\n\n"
-            "Takve situacije su ono što tražim. 🎯"
+            "🔥 Postoji vrsta situacije na tržištu o kojoj se gotovo nikad ne govori.\n\n"
+            "Kad dva kladioničara različito procijene isti događaj — "
+            "postoji prozor. Mali. Ali postoji.\n\n"
+            "Tražim ga. I kad se pojavi, dijelim ga prije nego se zatvori. ⚡"
         ),
         "lt": (
-            "🔥 Šią savaitę pamačiau kažką įdomaus rinkoje.\n\n"
-            "Vieno mačo koeficientai buvo aiškiai neatitinkantys istorinių duomenų. "
-            "Nedaug kas tai pastebėjo.\n\n"
-            "Tokios situacijos — tai ko aš ieškau. 🎯"
+            "🔥 Yra vienas rinkos situacijos tipas, apie kurį beveik nekalbama.\n\n"
+            "Kai du bukmeikeriai skirtingai įvertina tą patį įvykį — "
+            "atsidaro langas. Mažas. Bet jis egzistuoja.\n\n"
+            "Ieškau jo. Ir kai atsiranda — dalinuosi prieš jam užsiverdant. ⚡"
         ),
         "lv": (
-            "🔥 Šonedēļ redzēju ko interesantu tirgū.\n\n"
-            "Koeficienti vienā spēlē bija skaidri nesakritīgi ar vēsturi. "
-            "Maz kas to pamanīja.\n\n"
-            "Tādas situācijas ir tas, ko es meklēju. 🎯"
+            "🔥 Ir viens tirgus situācijas veids, par ko gandrīz nekad nerunā.\n\n"
+            "Kad divi bukmekeri atšķirīgi novērtē vienu un to pašu notikumu — "
+            "pastāv logs. Mazs. Bet pastāv.\n\n"
+            "Meklēju to. Un kad parādās — dalūos pirms tas aizveras. ⚡"
         ),
     },
 }
 
 # ─── Шаг 4: Прогрев 2 — социальное доказательство ────────────────────────────
+#
+# ЧТО ИЗМЕНЕНО И ПОЧЕМУ:
+# Было: мягкое "я не обещаю результатов, делюсь процессом" — звучит
+# слишком осторожно и снижает энергию воронки.
+# Стало: живой момент — реакция подписчиков в реальном времени,
+# ощущение движухи в канале прямо сейчас. FOMO усиливается.
+#
 WARM2 = {
     "es": (
-        "Por cierto — no soy la única.\n\n"
-        "En el canal donde comparto mi análisis hay gente que lleva meses "
-        "siguiendo mi lógica. Algunos empezaron escépticos. 😅\n\n"
-        "No prometo resultados — comparto mi proceso. El resto es decisión tuya."
+        "Hace una hora alguien en el canal escribió: *\"no me lo esperaba, pero funcionó\"*\n\n"
+        "No sé si le hablo a escépticos o a convencidos. "
+        "Solo sé que en el canal hay gente que lleva meses sin perderse nada.\n\n"
+        "Ahora mismo están ahí. 👀"
     ),
     "hr": (
-        "Usput — nisam jedina.\n\n"
-        "U kanalu gdje dijelim svoju analizu ima ljudi koji prate moju logiku "
-        "već mjesecima. Neki su počeli skeptično. 😅\n\n"
-        "Ne obećavam rezultate — dijelim svoj proces. Ostalo je tvoja odluka."
+        "Sat vremena prije netko u kanalu je napisao: *\"nisam to očekivala, ali je uspjelo\"*\n\n"
+        "Ne znam razgovaram li sa skepticima ili uvjerenima. "
+        "Samo znam da u kanalu ima ljudi koji već mjesecima ne propuštaju ništa.\n\n"
+        "Upravo su tamo. 👀"
     ),
     "lt": (
-        "Beje — aš ne viena.\n\n"
-        "Kanale, kur dalinuosi savo analize, yra žmonių, kurie seka mano logiką "
-        "jau kelis mėnesius. Kai kurie pradėjo skeptiškai. 😅\n\n"
-        "Nežadu rezultatų — dalinuosi savo procesu. Likusi dalis — tavo sprendimas."
+        "Prieš valandą kažkas kanale parašė: *\"nesitikėjau, bet suveikė\"*\n\n"
+        "Nežinau — kalbu su skeptikais ar įsitikinusiais. "
+        "Žinau tik, kad kanale yra žmonių, kurie jau mėnesius nieko nepraleido.\n\n"
+        "Jie ten dabar pat. 👀"
     ),
     "lv": (
-        "Starp citu — es neesmu vienīgā.\n\n"
-        "Kanālā, kur dalūos ar savu analīzi, ir cilvēki, kas seko manai loģikai "
-        "jau mēnešus. Daži sākuši skeptiski. 😅\n\n"
-        "Nesolu rezultātus — dalūos ar savu procesu. Pārējais ir tavs lēmums."
+        "Pirms stundas kāds kanālā rakstīja: *\"negaidīju, bet strādāja\"*\n\n"
+        "Nezinu — runāju ar skeptiķiem vai pārliecinātiem. "
+        "Zinu tikai, ka kanālā ir cilvēki, kas mēnešiem nav palaiduši garām neko.\n\n"
+        "Viņi tur ir tieši tagad. 👀"
     ),
 }
 
