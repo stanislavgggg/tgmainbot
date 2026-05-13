@@ -1,86 +1,90 @@
 """
-storage.py — хранение состояния пользователей.
-Использует JSON-файл для персистентности между перезапусками.
-Для продакшна замени на Redis или PostgreSQL.
+storage.py — хранилище пользователей.
+Данные живут в памяти + сохраняются в users.json на диск.
+На Railway данные сбрасываются при рестарте — для продакшена
+подключи PostgreSQL или Redis через переменную DATABASE_URL.
 """
+
 import json
 import os
-import logging
-from typing import Any, Optional
-from datetime import datetime
+import threading
+from datetime import datetime, timezone
+from typing import Any
 
-logger = logging.getLogger(__name__)
+from config import AI_MAX_HISTORY
 
-DB_FILE = os.getenv("DB_FILE", "users.json")
+_DB_FILE  = os.getenv("DB_FILE", "users.json")
+_lock     = threading.Lock()
+_users: dict[int, dict] = {}
 
-_cache: dict[int, dict] = {}
 
-
+# ── init: загружаем JSON если есть ──────────────────────────────────────────
 def _load() -> None:
-    global _cache
-    if os.path.exists(DB_FILE):
+    global _users
+    if os.path.exists(_DB_FILE):
         try:
-            with open(DB_FILE, "r", encoding="utf-8") as f:
+            with open(_DB_FILE, "r", encoding="utf-8") as f:
                 raw = json.load(f)
-            _cache = {int(k): v for k, v in raw.items()}
-        except Exception as e:
-            logger.warning(f"Could not load DB: {e}")
-            _cache = {}
+            _users = {int(k): v for k, v in raw.items()}
+        except Exception:
+            _users = {}
 
 
 def _save() -> None:
     try:
-        with open(DB_FILE, "w", encoding="utf-8") as f:
-            json.dump({str(k): v for k, v in _cache.items()}, f, ensure_ascii=False, indent=2)
-    except Exception as e:
-        logger.warning(f"Could not save DB: {e}")
+        with open(_DB_FILE, "w", encoding="utf-8") as f:
+            json.dump({str(k): v for k, v in _users.items()},
+                      f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
 
+
+_load()
+
+
+# ── публичный API ────────────────────────────────────────────────────────────
 
 def get_user(user_id: int) -> dict:
-    if not _cache:
-        _load()
-    if user_id not in _cache:
-        _cache[user_id] = {
-            "id": user_id,
-            "state": None,
-            "lang": None,
-            "interest": None,       # betting / casino / nodeposit / exclusive
-            "funnel_stage": "new",  # new / warming / tease / cta / subscribed
-            "ai_history": [],       # история для AI (последние N сообщений)
-            "created_at": datetime.now().isoformat(),
-            "last_active": datetime.now().isoformat(),
-            "reengage_1_sent": False,
-            "reengage_2_sent": False,
-            "username": None,
-            "first_name": None,
-        }
-    return _cache[user_id]
+    with _lock:
+        return dict(_users.get(user_id, {}))
 
 
 def update_user(user_id: int, **kwargs) -> None:
-    user = get_user(user_id)
-    user.update(kwargs)
-    user["last_active"] = datetime.now().isoformat()
-    _save()
-
-
-def add_ai_message(user_id: int, role: str, content: str, max_history: int = 10) -> None:
-    """Добавляет сообщение в историю AI-чата, обрезая до max_history."""
-    user = get_user(user_id)
-    history = user.get("ai_history", [])
-    history.append({"role": role, "content": content})
-    if len(history) > max_history * 2:
-        history = history[-max_history * 2:]
-    user["ai_history"] = history
-    user["last_active"] = datetime.now().isoformat()
-    _save()
+    with _lock:
+        user = _users.setdefault(user_id, {"id": user_id})
+        user.update(kwargs)
+        user["last_active"] = datetime.now(timezone.utc).isoformat()
+        _save()
 
 
 def get_all_users() -> list[dict]:
-    if not _cache:
-        _load()
-    return list(_cache.values())
+    with _lock:
+        return [dict(u) for u in _users.values()]
 
 
-# Загружаем при импорте
-_load()
+def add_ai_message(user_id: int, role: str, content: str) -> None:
+    """Добавляет сообщение в историю чата, обрезая старые."""
+    with _lock:
+        user = _users.setdefault(user_id, {"id": user_id})
+        history: list = user.setdefault("ai_history", [])
+        history.append({"role": role, "content": content})
+        # Держим только последние AI_MAX_HISTORY сообщений
+        if len(history) > AI_MAX_HISTORY:
+            user["ai_history"] = history[-AI_MAX_HISTORY:]
+        _save()
+
+
+def get_ai_history(user_id: int) -> list[dict]:
+    with _lock:
+        user = _users.get(user_id, {})
+        return list(user.get("ai_history", []))
+
+
+def add_tone(user_id: int, tone: str) -> None:
+    with _lock:
+        user = _users.setdefault(user_id, {"id": user_id})
+        tones: list = user.setdefault("tone_history", [])
+        tones.append(tone)
+        if len(tones) > 10:
+            user["tone_history"] = tones[-10:]
+        _save()
