@@ -16,42 +16,46 @@ HOOK: dict[str, str] = {
     "en": (
         "Hey.\n\n"
         "Not sure if you got here by chance or by instinct — but your timing is good. 🎯\n\n"
-        "My name is *Valeria*. I've spent 4 years tracking odds, bonuses and signals "
-        "across European markets.\n\n"
-        "I'm not selling anything. I don't ask for money. I just share what I find — "
-        "and there are people already making the most of it.\n\n"
+        "I'm *Valeria* — I spent 4 years tracking odds, bonuses and signals across European markets. "
+        "Built this bot so I can share what I find with more people at once.\n\n"
+        "I'm not selling anything. No subscriptions, no fees. "
+        "I just drop what I find into a channel — and people are already making the most of it.\n\n"
         "Which language do you want to continue in?"
     ),
     "es": (
         "Oye.\n\n"
         "No sé si llegaste aquí por suerte o por instinto — pero llegas en buen momento. 🎯\n\n"
-        "Me llamo *Valeria*. Llevo 4 años rastreando odds, bonos y señales en los mercados de España y Balcanes.\n\n"
-        "No vendo nada. No pido dinero. Solo comparto lo que encuentro — "
-        "y hay gente que ya está sacando partido de ello.\n\n"
+        "Soy *Valeria* — llevo 4 años rastreando odds, bonos y señales en los mercados de España y Balcanes. "
+        "Creé este bot para poder compartir lo que encuentro con más gente a la vez.\n\n"
+        "No vendo nada. Sin suscripciones, sin tarifas. "
+        "Solo comparto lo que encuentro en un canal — y hay gente que ya está sacando partido de ello.\n\n"
         "¿En qué idioma seguimos?"
     ),
     "hr": (
         "Hej.\n\n"
         "Ne znam jesi li ovdje slučajno ili instinktom — ali dolaziš u pravo vrijeme. 🎯\n\n"
-        "Zovem se *Valerija*. 4 godine pratim kvote, bonuse i signale na tržištima Hrvatske i Baltika.\n\n"
-        "Ništa ne prodajem. Ne tražim novac. Samo dijelim ono što pronađem — "
-        "i ima ljudi koji već izvlače korist iz toga.\n\n"
+        "Ja sam *Valerija* — 4 godine pratim kvote, bonuse i signale na tržištima Hrvatske i Baltika. "
+        "Napravila sam ovog bota da mogu dijeliti što pronađem s više ljudi odjednom.\n\n"
+        "Ništa ne prodajem. Bez pretplata, bez naknada. "
+        "Samo dijelim ono što pronađem u kanalu — i ima ljudi koji već izvlače korist iz toga.\n\n"
         "Na kojem jeziku nastavljamo?"
     ),
     "lt": (
         "Sveiki.\n\n"
         "Nežinau ar atkeliavote čia atsitiktinai ar instinktu — bet atvykstate geru laiku. 🎯\n\n"
-        "Mano vardas *Valerija*. 4 metus seku koeficientus, bonusus ir signalus Ispanijos ir Baltijos rinkose.\n\n"
-        "Nieko neparduodu. Nereikalauju pinigų. Tik dalinausi tuo, ką randu — "
-        "ir jau yra žmonių, kurie iš to gauna naudos.\n\n"
+        "Aš esu *Valerija* — 4 metus seku koeficientus, bonusus ir signalus Ispanijos ir Baltijos rinkose. "
+        "Sukūriau šį botą, kad galėčiau dalintis tuo, ką randu, su daugiau žmonių vienu metu.\n\n"
+        "Nieko neparduodu. Jokių prenumeratų, jokių mokesčių. "
+        "Tiesiog dalinausi tuo, ką randu kanale — ir jau yra žmonių, kurie iš to gauna naudos.\n\n"
         "Kuria kalba tęsiame?"
     ),
     "lv": (
         "Sveiki.\n\n"
         "Nezinu, vai esat šeit nejauši vai instinktīvi — bet ierodaties īstajā laikā. 🎯\n\n"
-        "Mani sauc *Valerija*. 4 gadus seku koeficientiem, bonusiem un signāliem Spānijas un Baltijas tirgos.\n\n"
-        "Es neko nepārdodu. Neprasu naudu. Tikai dalūos ar to, ko atrodu — "
-        "un jau ir cilvēki, kas no tā gūst labumu.\n\n"
+        "Es esmu *Valerija* — 4 gadus seku koeficientiem, bonusiem un signāliem Spānijas un Baltijas tirgos. "
+        "Izveidoju šo botu, lai varētu dalīties ar to, ko atrodu, ar vairāk cilvēkiem vienlaikus.\n\n"
+        "Es neko nepārdodu. Nav abonementu, nav maksas. "
+        "Vienkārši dalūos ar to, ko atrodu kanālā — un jau ir cilvēki, kas no tā gūst labumu.\n\n"
         "Kurā valodā turpinām?"
     ),
 }
@@ -881,40 +885,38 @@ FTD_PUSH: dict[str, dict[str, str]] = {
 WAKE_UP: dict[str, str] = {
     "en": (
         "Hey.\n\n"
-        "I've been waiting for you. 🎯\n\n"
-        "My name is *Valeria*. I track odds and bonuses that never make it "
-        "to any comparison site — only to the people who are in the right place.\n\n"
-        "I'm not selling anything. I just share what I find."
+        "I'm *Valeria* — I track odds, bonuses and signals across European markets. "
+        "Built this bot so I can reach more people at once instead of typing the same thing a hundred times a day. 😄\n\n"
+        "I'm not selling anything. No fees. I just share what I find — "
+        "and the people who are in the right place catch it first."
     ),
     "es": (
         "Hola.\n\n"
-        "Te estaba esperando. 🎯\n\n"
-        "Me llamo *Valeria*. Llevo años rastreando odds y bonos que no llegan "
-        "a ningún comparador — solo a las personas que están en el lugar correcto.\n\n"
-        "No vendo nada. Solo comparto lo que encuentro."
+        "Soy *Valeria* — rastro odds, bonos y señales en los mercados europeos. "
+        "Creé este bot para llegar a más gente a la vez en vez de escribir lo mismo cien veces al día. 😄\n\n"
+        "No vendo nada. Sin tarifas. Solo comparto lo que encuentro — "
+        "y las personas que están en el lugar correcto lo captan primero."
     ),
     "hr": (
         "Hej.\n\n"
-        "Čekala sam te. 🎯\n\n"
-        "Zovem se *Valerija*. Godinama pratim kvote i bonuse koji ne dolaze "
-        "ni na jedan uspoređivač — samo do ljudi koji su na pravom mjestu.\n\n"
-        "Ništa ne prodajem. Samo dijelim ono što pronađem."
+        "Ja sam *Valerija* — pratim kvote, bonuse i signale na europskim tržištima. "
+        "Napravila sam ovog bota da mogu doprijeti do više ljudi odjednom umjesto da tipkam isto sto puta na dan. 😄\n\n"
+        "Ništa ne prodajem. Bez naknada. Samo dijelim ono što pronađem — "
+        "i ljudi koji su na pravom mjestu to uhvate prvi."
     ),
     "lt": (
         "Sveiki.\n\n"
-        "Laukiau tavęs. 🎯\n\n"
-        "Mano vardas *Valerija*. Metų metus seku koeficientus ir bonusus, "
-        "kurie nepatenka į jokius palyginimo puslapius — tik pas žmones, "
-        "kurie yra tinkamoje vietoje.\n\n"
-        "Nieko neparduodu. Tik dalinausi tuo, ką randu."
+        "Aš esu *Valerija* — seku koeficientus, bonusus ir signalus Europos rinkose. "
+        "Sukūriau šį botą, kad galėčiau pasiekti daugiau žmonių vienu metu, o ne rašyti tą patį šimtą kartų per dieną. 😄\n\n"
+        "Nieko neparduodu. Jokių mokesčių. Tiesiog dalinausi tuo, ką randu — "
+        "ir žmonės, kurie yra tinkamoje vietoje, tai sugauna pirmieji."
     ),
     "lv": (
         "Sveiki.\n\n"
-        "Es tevi gaidīju. 🎯\n\n"
-        "Mani sauc *Valerija*. Gadus seku koeficientiem un bonusiem, "
-        "kas nenonāk nevienā salīdzinātājā — tikai pie cilvēkiem, "
-        "kas ir pareizajā vietā.\n\n"
-        "Es neko nepārdodu. Tikai dalūos ar to, ko atrodu."
+        "Es esmu *Valerija* — seku koeficientiem, bonusiem un signāliem Eiropas tirgos. "
+        "Izveidoju šo botu, lai varētu sasniegt vairāk cilvēku vienlaikus, nevis rakstīt to pašu simts reizes dienā. 😄\n\n"
+        "Es neko nepārdodu. Nav maksas. Tikai dalūos ar to, ko atrodu — "
+        "un cilvēki, kas ir pareizajā vietā, to uztver pirmie."
     ),
 }
 
