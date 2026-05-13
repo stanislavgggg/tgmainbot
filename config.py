@@ -27,6 +27,12 @@ class State(str, Enum):
 # ── Каналы ───────────────────────────────────────────────────────────────────
 # url — основной, extra_url — опциональный второй
 CHANNELS: dict[str, dict[str, dict]] = {
+    "en": {
+        "betting":   {"url": "https://t.me/ApuestasGuruES",  "extra_url": ""},
+        "casino":    {"url": "https://t.me/ApuestasGuruES",  "extra_url": ""},
+        "nodeposit": {"url": "https://t.me/ApuestasGuruES",  "extra_url": ""},
+        "exclusive": {"url": "https://t.me/ApuestasGuruES",  "extra_url": ""},
+    },
     "es": {
         "betting":   {"url": "https://t.me/ApuestasGuruES",  "extra_url": ""},
         "casino":    {"url": "https://t.me/ApuestasGuruES",  "extra_url": ""},
