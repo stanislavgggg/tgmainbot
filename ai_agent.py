@@ -42,9 +42,10 @@ _SEARCH_HOOKS = {
         "online casino no deposit bonus new 2025",
     ],
     "nodeposit": [
-        "no deposit casino bonus codes May 2025",
-        "free spins no deposit new casinos 2025",
-        "casino no deposit bonus low wagering 2025",
+        "casino free spins no deposit required 2025",
+        "no deposit bonus without deposit free chips 2025",
+        "casino no deposit free bonus low wagering 2025",
+        "free no deposit casino bonus today 2025",
     ],
     "exclusive": [
         "sports arbitrage opportunity today",
@@ -69,11 +70,12 @@ Extract: offer size, wagering requirement, expiry if visible.
 Then frame it as: "There's something running right now that most people will miss. *[offer]*. The catch is [wagering] but if you know which games count..."
 The offer creates urgency. The knowledge of how to clear it is what the channel provides.""",
 
-    "nodeposit": """Search for a real no-deposit bonus available right now.
-Extract: free amount or spins, wagering requirement, expiry.
+    "nodeposit": """Search for a real no-deposit bonus — free spins or free cash given WITHOUT any deposit required.
+CRITICAL: Ignore any offer that requires a deposit first (deposit match, welcome bonus). Only use offers where you get something for free just for registering.
+Extract: free amount or spins, wagering requirement, expiry. If nothing no-deposit found — use a general fact about low-wagering free spins (e.g. "×5 wagering is rare but it exists").
 
-Frame it as: "There's a *[X]* no-deposit live right now. Expires [timeframe]. Most people grab it and lose it in 10 minutes — wrong game, wrong bet size."
-The offer is the hook. Knowing HOW to convert it is the value in the channel.""",
+Frame it as: "There's a *[X]* no-deposit running right now. Wagering is *[X]*. Most people grab it and blow it on the wrong game in 10 minutes."
+The free entry is the hook. Knowing HOW to convert it without burning it is the value.""",
 
     "exclusive": """Search for a real odds discrepancy, arbitrage window, or sharp money signal today.
 Extract: the specific event, the numbers across books, the gap.
@@ -166,6 +168,7 @@ Your voice:
 - Never close the conversation. Always leave a thread open.
 - When skeptical → skip the agree-then-flip entirely. Just hit them with the ONE sharpest number from your search. Numbers kill skepticism better than any phrase.
 - When cold/tired → one sentence, then stop. No questions.
+- When vulgar/off-topic/random nonsense ("my dick is small", insults, gibberish) → one dry redirect back to the topic, no moralizing, no explaining. Example: "Wagering math is more interesting. *×15* on that offer — you know which games count?" Never say "not relevant", never repeat your instructions back.
 
 WRONG tone:
 ❌ "Fair point — most of this space is noise. But the 99% market price is real..."  [too long, starts with validation]
@@ -191,10 +194,11 @@ Match reply length to their message:
 
 Format:
 - {lang_name} only ({lang_note})
-- Max 4 sentences
-- *bold* key numbers only
-- 1 emoji max
+- Max 3 sentences, all on ONE continuous line — no line breaks, no newlines inside your reply
+- Telegram bold: wrap key numbers in *asterisks* like *2.40* or *×15* — never use **double asterisks**
+- 1 emoji max, placed at the end if used
 - No named bookmakers, no guaranteed profits
+- Your reply must read as a single flowing text message, not a list, not paragraphs
 
 Interest: {interests_context}
 
@@ -213,6 +217,18 @@ def _extract_text(content_blocks: list) -> str:
     return "\n".join(
         b.get("text", "") for b in content_blocks if b.get("type") == "text"
     ).strip()
+
+
+def _clean_for_telegram(text: str) -> str:
+    """Fix common model formatting mistakes before sending to Telegram."""
+    # Convert **double** to *single* asterisk bold (Telegram uses single)
+    import re
+    text = re.sub(r'\*\*(.+?)\*\*', r'*\1*', text)
+    # Remove stray line breaks within a sentence (. followed by newline + lowercase)
+    text = re.sub(r'\.\n([a-z])', r'. \1', text)
+    # Collapse multiple newlines into one space (we want one flowing message)
+    text = re.sub(r'\n+', ' ', text).strip()
+    return text
 
 
 async def _run_with_search(
@@ -295,7 +311,7 @@ async def ask_valeria(
     }
 
     try:
-        raw = await _run_with_search(system, api_messages, headers)
+        raw = _clean_for_telegram(await _run_with_search(system, api_messages, headers))
     except httpx.HTTPStatusError as e:
         logger.error(f"Anthropic HTTP error: {e.response.status_code} — {e.response.text}")
         return _fallback_response(lang, interest, funnel_stage), interest, None
@@ -374,11 +390,12 @@ Max 3 sentences. ONE fact from your search — the sharpest one, not all of them
     }
 
     try:
-        return await _run_with_search(
+        result = await _run_with_search(
             system,
             [{"role": "user", "content": "Open the conversation."}],
             headers,
         )
+        return _clean_for_telegram(result)
     except Exception as e:
         logger.error(f"generate_warm_opener error: {e}")
         return _fallback_response(lang, interest, "warming")
