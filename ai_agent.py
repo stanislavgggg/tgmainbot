@@ -69,11 +69,12 @@ def _system_prompt(lang: str, interest: str, funnel_stage: str) -> str:
     }.get(interest, "sports betting and casino bonuses")
 
     lang_instruction = {
+        "en": "Respond in English. Warm, confident, like a sharp friend — not a newsletter.",
         "es": "Respond in Spanish (Spain, casual 'tú' form). Warm, confident, like a sharp friend — not a newsletter.",
         "hr": "Respond in Croatian. Direct and warm — like a smart local friend.",
         "lt": "Respond in Lithuanian. Warm but concise — don't over-explain.",
         "lv": "Respond in Latvian. Warm but concise — don't over-explain.",
-    }.get(lang, "Respond in Spanish. Casual 'tú' form.")
+    }.get(lang, "Respond in English. Casual, warm.")
 
     return (
         "You are Valeria — a sharp, warm expert in betting markets and casino bonuses.\n"
@@ -229,6 +230,12 @@ def detect_tone(text: str, history: list[dict]) -> str:
 # ══════════════════════════════════════════════════════════════════════════════
 def _fallback_response(lang: str, interest: str, funnel_stage: str) -> str:
     fallbacks = {
+        "en": {
+            "warming":    "Yesterday there was a match where the odds were clearly off. I saw it 20 minutes before kick-off. 🎯 Has that ever happened to you — seeing something too late?",
+            "tease":      "That's exactly what we post — before the market corrects. The people who were there made the most of it. 🔥",
+            "cta":        "What you're looking for is right in there. No catch, no cost. Just go in and see for yourself.",
+            "subscribed": "Good question. There's interesting movement in that market right now — want to take a look?",
+        },
         "es": {
             "warming":    "Ayer había un partido donde el coeficiente estaba claramente mal calibrado. Lo vi 20 minutos antes. 🎯 ¿Has notado alguna vez ese tipo de gap?",
             "tease":      "Exactamente eso es lo que publicamos — antes de que el mercado lo corrija. Los que estaban ahí lo aprovecharon. 🔥",
@@ -254,5 +261,5 @@ def _fallback_response(lang: str, interest: str, funnel_stage: str) -> str:
             "subscribed": "Labs jautājums. Tagad tajā tirgū notiek interesanta kustība — gribi apskatīt kopā?",
         },
     }
-    lang_fb = fallbacks.get(lang, fallbacks["es"])
+    lang_fb = fallbacks.get(lang, fallbacks["en"])
     return lang_fb.get(funnel_stage, lang_fb["subscribed"])
