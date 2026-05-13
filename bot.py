@@ -351,7 +351,17 @@ async def _handle_funnel_reply(
     replies = get_user(user_id).get("stage_replies", 0) + 1
     update_user(user_id, stage_replies=replies)
 
+    # Force stage if counter already at limit — override AI decision
+    forced_next: str | None = None
+    if current_stage == "warming" and replies >= 3:
+        forced_next = "tease"
+    elif current_stage == "tease" and replies >= 2:
+        forced_next = "cta"
+
     await context.bot.send_chat_action(chat_id, "typing")
+
+    # If forcing transition, tell AI it's already at the boundary
+    effective_replies = max(replies, 3) if forced_next == "tease" else (max(replies, 2) if forced_next == "cta" else replies)
 
     response, refined, next_stage = await ask_valeria(
         user_message=user_text,
@@ -359,8 +369,12 @@ async def _handle_funnel_reply(
         lang=lang,
         interest=interest,
         funnel_stage=current_stage,
-        stage_replies=replies,
+        stage_replies=effective_replies,
     )
+
+    # Safety net: forced_next overrides AI
+    if forced_next:
+        next_stage = forced_next
 
     add_ai_message(user_id, "user", user_text)
     add_ai_message(user_id, "assistant", response)
