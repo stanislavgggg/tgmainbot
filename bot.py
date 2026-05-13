@@ -83,12 +83,13 @@ _check_lock()
 
 # ── Маппинг language_code → наш lang ────────────────────────────────────────
 _TG_LANG_MAP: dict[str, str] = {
+    "en": "en",
     "es": "es",
     "hr": "hr",
     "lt": "lt",
     "lv": "lv",
 }
-_SUPPORTED_LANGS = {"es", "hr", "lt", "lv"}
+_SUPPORTED_LANGS = {"en", "es", "hr", "lt", "lv"}
 
 
 def _detect_lang(tg_lang_code: str | None) -> str | None:
@@ -144,7 +145,7 @@ async def _send_image(
 
 
 def _get_cta_keyboard(lang: str, interest: str) -> InlineKeyboardMarkup:
-    channel = CHANNELS.get(lang, CHANNELS["es"]).get(interest, CHANNELS["es"]["betting"])
+    channel = CHANNELS.get(lang, CHANNELS["en"]).get(interest, CHANNELS["en"]["betting"])
     return InlineKeyboardMarkup([
         [InlineKeyboardButton(M.CTA.get(lang, "📲 OddsVault"), url=channel["url"])],
         [InlineKeyboardButton(M.CTA_BUTTON_JOINED.get(lang, "✅ Already in"), callback_data="user_joined")],
@@ -179,7 +180,7 @@ async def _deliver_tease(bot, user_id: int, chat_id: int, lang: str, interest: s
 async def _deliver_cta(bot, user_id: int, chat_id: int, lang: str, interest: str) -> None:
     """Отправляет CTA-кнопку и переводит state → CTA."""
     update_user(user_id, state=State.CTA, funnel_stage="cta")
-    cta_text = M.CTA_TEXT.get(lang, M.CTA_TEXT["es"])
+    cta_text = M.CTA_TEXT.get(lang, M.CTA_TEXT["en"])
     await bot.send_message(
         chat_id=chat_id,
         text=cta_text,
@@ -236,7 +237,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await asyncio.sleep(1.2)
 
         quiz_text = M.QUIZ.get(auto_lang, M.QUIZ["default"])
-        buttons   = M.QUIZ_BUTTONS.get(auto_lang, M.QUIZ_BUTTONS["es"])
+        buttons   = M.QUIZ_BUTTONS.get(auto_lang, M.QUIZ_BUTTONS["en"])
         keyboard  = [[InlineKeyboardButton(lbl, callback_data=cb)] for lbl, cb in buttons]
 
         await update.message.reply_text(
@@ -247,7 +248,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     else:
         # ── Язык не определён — стандартный multilang HOOK ──
-        hook_text = M.HOOK.get("es")
+        hook_text = M.HOOK.get("en")
         keyboard  = [[InlineKeyboardButton(lbl, callback_data=cb)] for lbl, cb in M.LANG_BUTTONS]
 
         await context.bot.send_chat_action(chat_id, "typing")
@@ -265,13 +266,13 @@ async def lang_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     query = update.callback_query
     await query.answer()
 
-    lang    = query.data.split("_")[1]   # es / hr / lt / lv
+    lang    = query.data[len("lang_"):]   # en / es / hr / lt / lv
     user_id = query.from_user.id
 
     update_user(user_id, lang=lang, state=State.QUIZ)
 
-    quiz_text = M.QUIZ.get(lang, M.QUIZ["default"])
-    buttons   = M.QUIZ_BUTTONS.get(lang, M.QUIZ_BUTTONS["es"])
+    quiz_text = M.QUIZ.get(lang, M.QUIZ.get("en", M.QUIZ["default"]))
+    buttons   = M.QUIZ_BUTTONS.get(lang, M.QUIZ_BUTTONS["en"])
     keyboard  = [[InlineKeyboardButton(lbl, callback_data=cb)] for lbl, cb in buttons]
 
     await query.edit_message_text(
@@ -286,10 +287,10 @@ async def interest_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     query    = update.callback_query
     await query.answer()
 
-    interest = query.data.split("_")[1]   # betting / casino / nodeposit / exclusive
+    interest = query.data[len("int_"):]   # betting / casino / nodeposit / exclusive
     user_id  = query.from_user.id
     user     = get_user(user_id)
-    lang     = user.get("lang", "es")
+    lang     = user.get("lang", "en")
     chat_id  = query.message.chat_id
 
     update_user(user_id, interest=interest, state=State.WARM1, funnel_stage="warming")
@@ -320,7 +321,7 @@ async def user_joined(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     user_id  = query.from_user.id
     user     = get_user(user_id)
-    lang     = user.get("lang", "es")
+    lang     = user.get("lang", "en")
     interest = user.get("interest", "betting")
     chat_id  = query.message.chat_id
 
@@ -496,7 +497,7 @@ async def _handle_tease_reply(
     await update.message.reply_text(response, parse_mode=ParseMode.MARKDOWN)
 
     # Пауза → CTA
-    cta_text = M.CTA_TEXT.get(lang, M.CTA_TEXT["es"])
+    cta_text = M.CTA_TEXT.get(lang, M.CTA_TEXT["en"])
     await asyncio.sleep(2.0)
     await context.bot.send_chat_action(chat_id, "typing")
     await asyncio.sleep(_typing_delay(cta_text))
@@ -645,7 +646,7 @@ async def reengage_job(context: ContextTypes.DEFAULT_TYPE) -> None:
     for user in users:
         user_id      = user.get("id")
         funnel_stage = user.get("funnel_stage", "new")
-        lang         = user.get("lang", "es")
+        lang         = user.get("lang", "en")
         interest     = user.get("interest", "betting")
 
         if funnel_stage in ("subscribed", "new"):
@@ -665,7 +666,7 @@ async def reengage_job(context: ContextTypes.DEFAULT_TYPE) -> None:
         except Exception:
             continue
 
-        channel      = CHANNELS.get(lang, CHANNELS["es"]).get(interest, CHANNELS["es"]["betting"])
+        channel      = CHANNELS.get(lang, CHANNELS["en"]).get(interest, CHANNELS["en"]["betting"])
         joined_label = M.CTA_BUTTON_JOINED.get(lang, "✅")
         cta_label    = M.CTA.get(lang, "📲 OddsVault")
 
@@ -676,7 +677,7 @@ async def reengage_job(context: ContextTypes.DEFAULT_TYPE) -> None:
 
         # ── Re-engage 1: 24ч ──
         if not user.get("reengage_1_sent") and elapsed >= REENGAGE_DELAY_1:
-            text = M.REENGAGE_1.get(lang, M.REENGAGE_1["es"])
+            text = M.REENGAGE_1.get(lang, M.REENGAGE_1["en"])
             try:
                 await context.bot.send_message(
                     chat_id=user_id,
@@ -693,7 +694,7 @@ async def reengage_job(context: ContextTypes.DEFAULT_TYPE) -> None:
         elif (user.get("reengage_1_sent")
               and not user.get("reengage_2_sent")
               and elapsed >= REENGAGE_DELAY_2):
-            text = M.REENGAGE_2.get(lang, M.REENGAGE_2["es"])
+            text = M.REENGAGE_2.get(lang, M.REENGAGE_2["en"])
             try:
                 await context.bot.send_message(
                     chat_id=user_id,
@@ -713,14 +714,15 @@ async def reengage_job(context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = get_user(update.effective_user.id)
-    lang = user.get("lang", "es")
+    lang = user.get("lang", "en")
     texts = {
+        "en": "ℹ️ I'm Valeria. Use /start to begin. I share market analysis and info — nothing more.",
         "es": "ℹ️ Soy Valeria. Usa /start para empezar. Comparto análisis e info del mercado — nada más.",
         "hr": "ℹ️ Ja sam Valerija. Koristi /start za početak. Dijelim tržišne analize i informacije.",
         "lt": "ℹ️ Aš esu Valerija. Naudok /start pradėti. Dalinuosi rinkos analizėmis ir informacija.",
         "lv": "ℹ️ Es esmu Valerija. Izmanto /start lai sāktu. Dalūos ar tirgus analīzēm un informāciju.",
     }
-    await update.message.reply_text(texts.get(lang, texts["es"]))
+    await update.message.reply_text(texts.get(lang, texts["en"]))
 
 
 # ════════════════════════════════════════════════════════════════════════════
