@@ -1,11 +1,13 @@
 """
 ai_agent.py — OddsVault Bot
-v3.1: Жёсткий контроль воронки — счётчик реплик в промпте,
-      NEXT:tease / NEXT:cta по правилам, не по настроению AI.
+v4.0: web_search tool use — Valeria ищет реальные данные перед ответом.
+      Agentic loop: model decides when to search, we handle tool_use → tool_result.
 """
 
+import json
 import logging
 import re
+import uuid
 from typing import Optional
 
 import httpx
@@ -16,6 +18,49 @@ logger = logging.getLogger(__name__)
 
 ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
 MODEL         = "claude-haiku-4-5-20251001"
+
+# web_search даёт реальные данные — нужно больше токенов (поиск + reasoning + ответ)
+SEARCH_MAX_TOKENS = max(AI_MAX_TOKENS, 1500)
+
+WEB_SEARCH_TOOL = {
+    "type": "web_search_20250305",
+    "name": "web_search",
+}
+
+
+# ── Search guidance в системном промпте ──────────────────────────────────────
+_SEARCH_GUIDANCE = {
+    "betting": (
+        "You have web_search. Use it when you need REAL data to sound credible:\n"
+        "- Current odds or line movements on upcoming matches (search: 'odds [match] today' or '[league] betting lines')\n"
+        "- Recent results that moved a market ('Dinamo Zagreb result', 'La Liga weekend results')\n"
+        "- Injury/suspension news that affects lines ('[team] injury news')\n"
+        "Search once, extract ONE sharp number or fact, then reply.\n"
+        "If search returns nothing useful — use your knowledge of patterns, don't invent specific scores."
+    ),
+    "casino": (
+        "You have web_search. Use it when you need REAL data:\n"
+        "- Current no-deposit bonus offers ('no deposit bonus [country] 2025')\n"
+        "- RTP figures for specific slots ('[slot name] RTP')\n"
+        "- Wagering requirement norms ('casino bonus wagering requirements average 2025')\n"
+        "Search once, extract ONE sharp number or fact, then reply.\n"
+        "If search returns nothing useful — use your knowledge, don't invent specific offers."
+    ),
+    "nodeposit": (
+        "You have web_search. Use it to find REAL current no-deposit offers:\n"
+        "- 'no deposit free spins [country] 2025'\n"
+        "- 'casino no deposit bonus codes May 2025'\n"
+        "Search once, extract a real offer with its wagering terms if visible, then reply.\n"
+        "If search returns nothing useful — use your knowledge of typical offers."
+    ),
+    "exclusive": (
+        "You have web_search. Use it for REAL market intelligence:\n"
+        "- Arbitrage opportunities or line discrepancies ('odds comparison [event]')\n"
+        "- Sharp money signals ('betting market [match] line movement')\n"
+        "Search once, extract ONE sharp insight, then reply.\n"
+        "If nothing useful — use your knowledge of patterns."
+    ),
+}
 
 
 def _system_prompt(lang: str, interest: str, funnel_stage: str, stage_replies: int = 0) -> str:
@@ -74,6 +119,8 @@ def _system_prompt(lang: str, interest: str, funnel_stage: str, stage_replies: i
         "exclusive": "premium market analysis, early signals, arbitrage, cross-market overlaps",
     }.get(interest, "sports betting and casino bonuses")
 
+    search_guidance = _SEARCH_GUIDANCE.get(interest, _SEARCH_GUIDANCE["betting"])
+
     lang_map = {
         "en": ("English", "casual British/American"),
         "es": ("Spanish (Spain)", "casual tú, peninsular"),
@@ -115,16 +162,19 @@ Tone examples that are RIGHT:
 ✅ "*2.40* when it should've been closer to 1.95. That gap doesn't stay open long."
 ✅ "tired" → "Yeah. The numbers will still be there tomorrow." [stop — no more]
 
+Web search:
+{search_guidance}
+
 Format:
 - {lang_name} only ({lang_note})
-- Max 4 sentences
+- Max 4 sentences in your final reply
 - 1–2 emojis max, only when they add something
 - *bold* only around key numbers
 - No guaranteed profits, no named bookmakers
 
 Interest context: {interests_context}
 
-Funnel tags (invisible to user, go on their own line at the very END):
+Funnel tags (invisible to user, go on their own line at the very END of your final reply):
   [NEXT:tease]  — when moving warming → tease
   [NEXT:cta]    — when moving tease → CTA
   [INTEREST:casino/betting/nodeposit/exclusive] — if interest clearly shifts
@@ -132,6 +182,92 @@ Funnel tags (invisible to user, go on their own line at the very END):
 Current stage:
 {stage_instruction}"""
 
+
+# ── Agentic loop helper ───────────────────────────────────────────────────────
+
+def _extract_text(content_blocks: list) -> str:
+    """Pull all text blocks from a content list into one string."""
+    return "\n".join(
+        b.get("text", "") for b in content_blocks if b.get("type") == "text"
+    ).strip()
+
+
+async def _run_with_search(
+    system: str,
+    messages: list[dict],
+    headers: dict,
+    max_loops: int = 4,
+) -> str:
+    """
+    Agentic loop: send request, handle tool_use (web_search) calls,
+    feed tool_result back, repeat until stop_reason == 'end_turn'.
+    Returns final text response.
+    """
+    payload = {
+        "model":      MODEL,
+        "max_tokens": SEARCH_MAX_TOKENS,
+        "system":     system,
+        "tools":      [WEB_SEARCH_TOOL],
+        "messages":   messages,
+    }
+
+    async with httpx.AsyncClient(timeout=30) as client:
+        for loop in range(max_loops):
+            resp = await client.post(ANTHROPIC_URL, json=payload, headers=headers)
+            resp.raise_for_status()
+            data = resp.json()
+
+            stop_reason = data.get("stop_reason")
+            content     = data.get("content", [])
+
+            # Done — return text
+            if stop_reason == "end_turn":
+                return _extract_text(content)
+
+            # Model wants to search
+            if stop_reason == "tool_use":
+                tool_results = []
+                for block in content:
+                    if block.get("type") != "tool_use":
+                        continue
+                    tool_id   = block.get("id", str(uuid.uuid4()))
+                    tool_name = block.get("name")
+                    tool_input = block.get("input", {})
+
+                    if tool_name == "web_search":
+                        # The API handles the actual search — we just pass back
+                        # the tool_result with the content it returned.
+                        # The content blocks from the search are in block["content"]
+                        # for web_search_20250305 — pass them through verbatim.
+                        search_content = block.get("content", [])
+                        tool_results.append({
+                            "type":       "tool_result",
+                            "tool_use_id": tool_id,
+                            "content":    search_content,
+                        })
+                    else:
+                        # Unknown tool — return empty result to unblock
+                        tool_results.append({
+                            "type":       "tool_result",
+                            "tool_use_id": tool_id,
+                            "content":    [],
+                        })
+
+                # Append assistant turn + tool results to messages
+                payload["messages"] = payload["messages"] + [
+                    {"role": "assistant", "content": content},
+                    {"role": "user",      "content": tool_results},
+                ]
+                continue  # next loop iteration
+
+            # Unexpected stop reason — return whatever text we have
+            return _extract_text(content)
+
+    # Max loops exceeded — return whatever was in last response
+    return _extract_text(content)
+
+
+# ── Public API ────────────────────────────────────────────────────────────────
 
 async def ask_valeria(
     user_message: str,
@@ -155,12 +291,6 @@ async def ask_valeria(
             api_messages.append({"role": msg["role"], "content": msg["content"]})
     api_messages.append({"role": "user", "content": user_message})
 
-    payload = {
-        "model":      MODEL,
-        "max_tokens": AI_MAX_TOKENS,
-        "system":     system,
-        "messages":   api_messages,
-    }
     headers = {
         "x-api-key":         ANTHROPIC_KEY,
         "anthropic-version": "2023-06-01",
@@ -168,18 +298,13 @@ async def ask_valeria(
     }
 
     try:
-        async with httpx.AsyncClient(timeout=20) as client:
-            resp = await client.post(ANTHROPIC_URL, json=payload, headers=headers)
-            resp.raise_for_status()
-            data = resp.json()
+        raw = await _run_with_search(system, api_messages, headers)
     except httpx.HTTPStatusError as e:
         logger.error(f"Anthropic API HTTP error: {e.response.status_code} — {e.response.text}")
         return _fallback_response(lang, interest, funnel_stage), interest, None
     except Exception as e:
         logger.error(f"Anthropic API error: {e}")
         return _fallback_response(lang, interest, funnel_stage), interest, None
-
-    raw = data.get("content", [{}])[0].get("text", "").strip()
 
     # Parse [NEXT:stage]
     next_stage = None
@@ -212,7 +337,7 @@ async def ask_valeria(
 
 
 async def generate_warm_opener(lang: str, interest: str) -> str:
-    """First warming message — no user input yet."""
+    """First warming message — searches for real data before opening."""
     if not ANTHROPIC_KEY:
         return _fallback_response(lang, interest, "warming")
 
@@ -223,13 +348,7 @@ async def generate_warm_opener(lang: str, interest: str) -> str:
         "exclusive": "premium signals, arbitrage, cross-market analysis",
     }.get(interest, "sports betting and casino bonuses")
 
-    lang_instruction = {
-        "en": "Write in English.",
-        "es": "Escribe en español (España, tú).",
-        "hr": "Piši na hrvatskom.",
-        "lt": "Rašyk lietuviškai.",
-        "lv": "Raksti latviski.",
-    }.get(lang, "Write in English.")
+    search_guidance = _SEARCH_GUIDANCE.get(interest, _SEARCH_GUIDANCE["betting"])
 
     lang_name = {
         "en": "English", "es": "Spanish (Spain, casual tú)",
@@ -239,27 +358,23 @@ async def generate_warm_opener(lang: str, interest: str) -> str:
     system = (
         "You are Valeria. 26. You obsess over betting markets and casino bonuses.\n\n"
         "Send ONE opening text message. You're starting a conversation, not introducing yourself.\n\n"
-        "Open with a specific fact, number, or moment from this week — something real, tied to their interest. "
-        "No vague openers like 'there's so much going on' or 'this market is crazy'. Give the actual thing.\n"
-        "End with ONE short question that's easy to answer. Not 'what do you think?' — something specific.\n"
+        "Before writing, use web_search to find ONE real, current, specific fact tied to the user's interest "
+        "(a real line, a real offer, a real movement from today or this week). "
+        "That fact becomes the hook of your opener.\n\n"
+        "Open with that fact. End with ONE short, specific question.\n"
         "Do NOT mention any channel, link, or group.\n\n"
         "Examples of wrong openers:\n"
         "❌ 'Hey! So glad you're interested in casino bonuses. There's a lot to cover here...'\n"
         "❌ 'Great choice! Sports betting has so many angles. What specifically are you curious about?'\n\n"
         "Examples of right openers:\n"
-        "✅ 'Someone in my circle turned a *€30 no-deposit* into €340 last week. Took 4 days. The trick was the slot selection — most people just pick whatever. You ever actually looked at RTP before hitting play?'\n"
+        "✅ 'Someone in my circle turned a *€30 no-deposit* into €340 last week. Took 4 days. The trick was slot selection — most people just pick whatever. You ever actually looked at RTP before hitting play?'\n"
         "✅ '*2.45* on the over last Saturday. Should've been 1.90. That kind of gap — you notice it or you don't.'\n\n"
+        f"Web search guidance:\n{search_guidance}\n\n"
         f"Language: {lang_name} only.\n"
-        "Max 4 sentences. 1 emoji max. *bold* only on numbers. No guaranteed profits.\n\n"
+        "Max 4 sentences in your reply. 1 emoji max. *bold* only on numbers. No guaranteed profits. No named bookmakers.\n\n"
         f"Interest context: {interests_context}"
     )
 
-    payload = {
-        "model":      MODEL,
-        "max_tokens": AI_MAX_TOKENS,
-        "system":     system,
-        "messages":   [{"role": "user", "content": "Start the conversation."}],
-    }
     headers = {
         "x-api-key":         ANTHROPIC_KEY,
         "anthropic-version": "2023-06-01",
@@ -267,11 +382,11 @@ async def generate_warm_opener(lang: str, interest: str) -> str:
     }
 
     try:
-        async with httpx.AsyncClient(timeout=20) as client:
-            resp = await client.post(ANTHROPIC_URL, json=payload, headers=headers)
-            resp.raise_for_status()
-            data = resp.json()
-        return data.get("content", [{}])[0].get("text", "").strip()
+        return await _run_with_search(
+            system,
+            [{"role": "user", "content": "Start the conversation."}],
+            headers,
+        )
     except Exception as e:
         logger.error(f"generate_warm_opener error: {e}")
         return _fallback_response(lang, interest, "warming")
