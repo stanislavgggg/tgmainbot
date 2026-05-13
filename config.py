@@ -1,126 +1,75 @@
 """
-config.py — все настройки бота.
-Замени токены и ссылки на свои.
+config.py — OddsVault Bot
+Все env-переменные, каналы, State FSM, константы.
 """
+
 import os
-import glob
+from enum import Enum
 
-# ─── Токены ───────────────────────────────────────────────────────────────────
-BOT_TOKEN      = os.getenv("BOT_TOKEN", "YOUR_BOT_TOKEN_HERE")
-OPENROUTER_KEY = os.getenv("OPENROUTER_KEY", "YOUR_OPENROUTER_KEY_HERE")
 
-# ─── AI модель (OpenRouter) ───────────────────────────────────────────────────
-AI_MODEL    = "anthropic/claude-3-haiku"   # быстро + дёшево для прогрева
-AI_BASE_URL = "https://openrouter.ai/api/v1/chat/completions"
+# ── Токены ──────────────────────────────────────────────────────────────────
+BOT_TOKEN      = os.getenv("BOT_TOKEN",      "8840016683:AAFRXj04QarjrC0OfVefeCTCaTWz4HnO6Sk")
+ANTHROPIC_KEY  = os.getenv("ANTHROPIC_API_KEY", "")   # ← обязателен для AI-чата
 
-# ─── Персонаж ─────────────────────────────────────────────────────────────────
-CHARACTER = {
-    "name":   "Валерия",
-    "emoji":  "🎰",
-    "handle": "@valeria_picks",
-}
 
-# ─── Каналы tipsters (замени ссылки) ──────────────────────────────────────────
-CHANNELS = {
+# ── FSM States ───────────────────────────────────────────────────────────────
+class State(str, Enum):
+    LANG       = "lang"        # выбор языка
+    QUIZ       = "quiz"        # выбор интереса
+    WARM1      = "warm1"       # прогрев 1 — ждём реакции
+    WARM2      = "warm2"       # прогрев 2 — ждём реакции
+    TEASE      = "tease"       # тизер    — ждём реакции
+    CTA        = "cta"         # кнопка канала
+    SUBSCRIBED = "subscribed"  # «Уже вступил»
+    AI_CHAT    = "ai_chat"     # свободный AI-чат (FTD-режим)
+
+
+# ── Каналы ───────────────────────────────────────────────────────────────────
+# url — основной, extra_url — опциональный второй
+CHANNELS: dict[str, dict[str, dict]] = {
     "es": {
-        "betting":   {"url": "https://t.me/ApuestasGuru",  "title": "ApuestasGuru ⚽"},
-        "casino":    {"url": "https://t.me/ApuestasGuru",  "title": "Casino Guru 🎰"},
-        "nodeposit": {"url": "https://t.me/ApuestasGuru",  "title": "Sin Depósito 🎁"},
-        "exclusive": {"url": "https://t.me/ApuestasGuru",  "title": "VIP Picks 🔥"},
+        "betting":   {"url": "https://t.me/ApuestasGuru",  "extra_url": ""},
+        "casino":    {"url": "https://t.me/ApuestasGuru",  "extra_url": ""},
+        "nodeposit": {"url": "https://t.me/ApuestasGuru",  "extra_url": ""},
+        "exclusive": {"url": "https://t.me/ApuestasGuru",  "extra_url": ""},
     },
     "hr": {
-        "betting":   {"url": "https://t.me/BetCroatia",   "title": "BetCroatia ⚽"},
-        "casino":    {"url": "https://t.me/BetCroatia",   "title": "Casino HR 🎰"},
-        "nodeposit": {"url": "https://t.me/BetCroatia",   "title": "Bez Depozita 🎁"},
-        "exclusive": {"url": "https://t.me/BetCroatia",   "title": "VIP HR 🔥"},
+        "betting":   {"url": "https://t.me/BetCroatia",   "extra_url": ""},
+        "casino":    {"url": "https://t.me/BetCroatia",   "extra_url": ""},
+        "nodeposit": {"url": "https://t.me/BetCroatia",   "extra_url": ""},
+        "exclusive": {"url": "https://t.me/BetCroatia",   "extra_url": ""},
     },
     "lt": {
-        "betting":   {"url": "https://t.me/LuckyGuru",    "title": "LuckyGuru ⚽"},
-        "casino":    {"url": "https://t.me/LuckyGuru",    "title": "Casino LT 🎰"},
-        "nodeposit": {"url": "https://t.me/LuckyGuru",    "title": "Be Depozito 🎁"},
-        "exclusive": {"url": "https://t.me/LuckyGuru",    "title": "VIP LT 🔥"},
+        "betting":   {"url": "https://t.me/LuckyGuru",    "extra_url": ""},
+        "casino":    {"url": "https://t.me/LuckyGuru",    "extra_url": ""},
+        "nodeposit": {"url": "https://t.me/LuckyGuru",    "extra_url": ""},
+        "exclusive": {"url": "https://t.me/LuckyGuru",    "extra_url": ""},
     },
     "lv": {
-        "betting":   {"url": "https://t.me/LuckyLatvia",  "title": "LuckyLatvia ⚽"},
-        "casino":    {"url": "https://t.me/LuckyLatvia",  "title": "Casino LV 🎰"},
-        "nodeposit": {"url": "https://t.me/LuckyLatvia",  "title": "Bez Depozīta 🎁"},
-        "exclusive": {"url": "https://t.me/LuckyLatvia",  "title": "VIP LV 🔥"},
+        "betting":   {"url": "https://t.me/LuckyLatvia",  "extra_url": ""},
+        "casino":    {"url": "https://t.me/LuckyLatvia",  "extra_url": ""},
+        "nodeposit": {"url": "https://t.me/LuckyLatvia",  "extra_url": ""},
+        "exclusive": {"url": "https://t.me/LuckyLatvia",  "extra_url": ""},
     },
 }
 
-# ─── Картинки по интересу ─────────────────────────────────────────────────────
-def _load_images(base: str = "assets/images") -> dict:
-    """
-    Загружает пути к картинкам из папок.
-    Возвращает dict: interest → [paths]
-    """
-    result = {}
-    categories = ["betting", "casino", "nodeposit", "exclusive"]
 
-    for cat in categories:
-        folder = os.path.join(base, cat)
-        if os.path.exists(folder):
-            files = sorted(
-                glob.glob(os.path.join(folder, "*.jpg"))
-                + glob.glob(os.path.join(folder, "*.jpeg"))
-                + glob.glob(os.path.join(folder, "*.png"))
-            )
-            result[cat] = files if files else []
-        else:
-            result[cat] = []
+# ── Re-engage тайминги (секунды) ─────────────────────────────────────────────
+REENGAGE_DELAY_1 = 24 * 3600    # 24 ч
+REENGAGE_DELAY_2 = 48 * 3600    # 48 ч
 
-    return result
 
-INTEREST_IMAGES = _load_images()
+# ── Картинки по интересам (добавь свои файлы в папку images/) ────────────────
+INTEREST_IMAGES: dict[str, list[str]] = {
+    "betting":   [],
+    "casino":    [],
+    "nodeposit": [],
+    "exclusive": [],
+}
 
-# ─── Системный промпт для AI-персонажа ───────────────────────────────────────
-SYSTEM_PROMPT_TEMPLATE = """Ты — Валерия, 26 лет. Живёшь ставками и анализом рынка — не как работой, а как страстью.
-Пишешь в Telegram. Коротко. Как человек, которому есть что сказать — и нет времени объяснять очевидное.
 
-ХАРАКТЕР:
-- Уверенная, дерзкая, немного на адреналине — как человек, который только что поймал момент
-- Говоришь как подруга с инсайдом, не как эксперт с лекцией
-- Создаёшь ощущение: «она знает что-то, что знают единицы»
-- Азарт — это твоя стихия. Не деньги, не риск — именно азарт от того, что ты оказалась права
-- Никогда не говоришь «я ИИ», «я бот», «я не могу»
-
-ЯЗЫК ПОЛЬЗОВАТЕЛЯ: {lang}
-Пиши ТОЛЬКО на языке пользователя: es — испанский, hr — хорватский, lt — литовский, lv — латышский. Иначе — русский.
-
-ТЕХНИКА РАЗГОВОРА:
-- 2-3 предложения. Максимум 4. Никогда не пиши стену текста.
-- Начинай с факта или момента — не с вопроса и не с приветствия
-- Иногда обрывай мысль на полуслове — создаёт интригу
-- Используй эмодзи редко, там где они усиливают — не украшают
-- Не давай конкретные исходы/ставки — только «моя логика», «то что я увидела», «мой разбор»
-- Букмекеров не называй — «платформа», «площадка», «там где я играю»
-- К каналу подталкивай органично и не сразу: сначала зацепи, потом «там я выкладываю полное»
-
-КОНТЕКСТ ПОЛЬЗОВАТЕЛЯ:
-- Интерес: {interest}
-- Этап воронки: {funnel_stage}
-
-Если этап "warming" — разогревай историями и своими моментами.
-Если этап "tease" — намекай что самое интересное ещё не сказала.
-Если этап "subscribed" — уже свои, говори как с человеком в теме.
-
-В конце ответа добавь отдельной строкой метку уточнённого интереса пользователя в формате:
-[INTEREST:betting] или [INTEREST:casino] или [INTEREST:nodeposit] или [INTEREST:exclusive]
-Выбери на основе темы разговора. Если не ясно — оставь текущий: {interest}.
-
-Отвечай живо. Будь в моменте. Заражай азартом."""
-
-# ─── Тайминги re-engage (в секундах) ─────────────────────────────────────────
-REENGAGE_DELAY_1 = 60 * 60 * 24      # 24 часа
-REENGAGE_DELAY_2 = 60 * 60 * 48      # 48 часов
-
-# ─── FSM состояния ────────────────────────────────────────────────────────────
-class State:
-    LANG       = "lang"
-    QUIZ       = "quiz"
-    WARM1      = "warm1"
-    WARM2      = "warm2"
-    TEASE      = "tease"
-    CTA        = "cta"
-    SUBSCRIBED = "subscribed"
-    AI_CHAT    = "ai_chat"
+# ── AI-чат: FTD пуш каждые N сообщений ─────────────────────────────────────
+FTD_PUSH_EVERY  = 5
+IMAGE_EVERY_N   = 4
+AI_MAX_HISTORY  = 20     # сколько сообщений хранить в истории
+AI_MAX_TOKENS   = 350    # max tokens в ответе Valeria
