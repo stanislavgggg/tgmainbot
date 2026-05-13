@@ -359,6 +359,7 @@ async def _handle_funnel_reply(
         lang=lang,
         interest=interest,
         funnel_stage=current_stage,
+        stage_replies=replies,
     )
 
     add_ai_message(user_id, "user", user_text)
