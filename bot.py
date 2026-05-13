@@ -69,9 +69,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         username=username,
     )
 
-    # Определяем язык интерфейса Telegram как подсказку
-    tg_lang = (update.effective_user.language_code or "")[:2].lower()
-    hook_text = M.HOOK.get(tg_lang, M.HOOK["default"])
+    # Всегда показываем английский крючок — дефолтный язык интерфейса
+    hook_text = M.HOOK["default"]
 
     keyboard = [[InlineKeyboardButton(label, callback_data=cb)] for label, cb in M.LANG_BUTTONS]
 
