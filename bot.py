@@ -293,7 +293,7 @@ async def interest_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     lang     = user.get("lang", "en")
     chat_id  = query.message.chat_id
 
-    update_user(user_id, interest=interest, state=State.WARM1, funnel_stage="warming")
+    update_user(user_id, interest=interest, state=State.WARM1, funnel_stage="warming", stage_replies=0)
 
     warm1_text = M.get(M.WARM1, lang, interest)
 
@@ -396,11 +396,13 @@ async def _handle_warm1_reply(
     context: ContextTypes.DEFAULT_TYPE,
     user_id: int, lang: str, interest: str, user_text: str,
 ) -> None:
-    """Пользователь ответил на WARM1 → AI зеркалит тон → пауза → WARM2."""
+    """Пользователь ответил на WARM1 → AI зеркалит тон → ждём ещё одного ответа → WARM2."""
     chat_id = update.effective_chat.id
     history = get_ai_history(user_id)
+    user    = get_user(user_id)
+    replies = user.get("stage_replies", 0) + 1
+    update_user(user_id, stage_replies=replies)
 
-    # Typing пока AI думает
     await context.bot.send_chat_action(chat_id, "typing")
 
     response, refined = await ask_valeria(
@@ -418,16 +420,18 @@ async def _handle_warm1_reply(
         update_user(user_id, interest=refined)
         interest = refined
 
-    # Пауза перед ответом — как живой человек
     await asyncio.sleep(_typing_delay(response) * 0.6)
     await update.message.reply_text(response, parse_mode=ParseMode.MARKDOWN)
 
-    # Пауза → WARM2 (ждём следующую реакцию)
-    warm2_text = M.get(M.WARM2, lang)
-    await asyncio.sleep(2.5)
-    await context.bot.send_chat_action(chat_id, "typing")
-    await asyncio.sleep(_typing_delay(warm2_text))
-    await _deliver_warm2(context.bot, user_id, chat_id, lang)
+    # После 1-го ответа AI продолжает диалог.
+    # Переходим к WARM2 только когда пользователь напишет ещё раз (replies >= 1).
+    if replies >= 1:
+        warm2_text = M.get(M.WARM2, lang)
+        await asyncio.sleep(2.0)
+        await context.bot.send_chat_action(chat_id, "typing")
+        await asyncio.sleep(_typing_delay(warm2_text) * 0.7)
+        await _deliver_warm2(context.bot, user_id, chat_id, lang)
+        update_user(user_id, stage_replies=0)  # сбрасываем счётчик для следующего этапа
 
 
 async def _handle_warm2_reply(
@@ -435,9 +439,12 @@ async def _handle_warm2_reply(
     context: ContextTypes.DEFAULT_TYPE,
     user_id: int, lang: str, interest: str, user_text: str,
 ) -> None:
-    """Пользователь ответил на WARM2 → AI зеркалит тон → пауза → TEASE."""
+    """Пользователь ответил на WARM2 → AI зеркалит тон → ждём ещё ответа → TEASE."""
     chat_id = update.effective_chat.id
     history = get_ai_history(user_id)
+    user    = get_user(user_id)
+    replies = user.get("stage_replies", 0) + 1
+    update_user(user_id, stage_replies=replies)
 
     await context.bot.send_chat_action(chat_id, "typing")
 
@@ -459,12 +466,14 @@ async def _handle_warm2_reply(
     await asyncio.sleep(_typing_delay(response) * 0.6)
     await update.message.reply_text(response, parse_mode=ParseMode.MARKDOWN)
 
-    # Пауза → TEASE
-    tease_text = M.get(M.TEASE, lang, interest)
-    await asyncio.sleep(2.5)
-    await context.bot.send_chat_action(chat_id, "typing")
-    await asyncio.sleep(_typing_delay(tease_text))
-    await _deliver_tease(context.bot, user_id, chat_id, lang, interest)
+    # Переходим к TEASE только после первого ответа на WARM2
+    if replies >= 1:
+        tease_text = M.get(M.TEASE, lang, interest)
+        await asyncio.sleep(2.0)
+        await context.bot.send_chat_action(chat_id, "typing")
+        await asyncio.sleep(_typing_delay(tease_text) * 0.7)
+        await _deliver_tease(context.bot, user_id, chat_id, lang, interest)
+        update_user(user_id, stage_replies=0)
 
 
 async def _handle_tease_reply(
@@ -472,9 +481,12 @@ async def _handle_tease_reply(
     context: ContextTypes.DEFAULT_TYPE,
     user_id: int, lang: str, interest: str, user_text: str,
 ) -> None:
-    """Пользователь ответил на TEASE → AI зеркалит тон → пауза → CTA."""
+    """Пользователь ответил на TEASE → AI дожимает → ждём ещё ответа → CTA."""
     chat_id = update.effective_chat.id
     history = get_ai_history(user_id)
+    user    = get_user(user_id)
+    replies = user.get("stage_replies", 0) + 1
+    update_user(user_id, stage_replies=replies)
 
     await context.bot.send_chat_action(chat_id, "typing")
 
@@ -496,12 +508,14 @@ async def _handle_tease_reply(
     await asyncio.sleep(_typing_delay(response) * 0.6)
     await update.message.reply_text(response, parse_mode=ParseMode.MARKDOWN)
 
-    # Пауза → CTA
-    cta_text = M.CTA_TEXT.get(lang, M.CTA_TEXT["en"])
-    await asyncio.sleep(2.0)
-    await context.bot.send_chat_action(chat_id, "typing")
-    await asyncio.sleep(_typing_delay(cta_text))
-    await _deliver_cta(context.bot, user_id, chat_id, lang, interest)
+    # CTA после первого ответа на TEASE
+    if replies >= 1:
+        cta_text = M.CTA_TEXT.get(lang, M.CTA_TEXT["en"])
+        await asyncio.sleep(2.0)
+        await context.bot.send_chat_action(chat_id, "typing")
+        await asyncio.sleep(_typing_delay(cta_text) * 0.7)
+        await _deliver_cta(context.bot, user_id, chat_id, lang, interest)
+        update_user(user_id, stage_replies=0)
 
 
 async def _handle_cta_reply(
