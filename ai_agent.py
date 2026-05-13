@@ -45,7 +45,11 @@ def _system_prompt(lang: str, interest: str, funnel_stage: str, stage_replies: i
             "- User asks where you post / where to find this info\n"
             "- User is clearly engaged but going off-topic → redirect + [NEXT:tease]\n"
             "- 3+ exchanges have happened in warming\n\n"
-            f"THIS REPLY: {next_rule}"
+            f"THIS REPLY: {next_rule}\n\n"
+        "ABSOLUTE BANS IN WARMING:\n"
+        "- Never say goodbye, good luck, take care, or any closing phrase\n"
+        "- Never end the conversation — always leave a thread open\n"
+        "- Never summarize or wrap up — you are mid-conversation, not closing it"
         )
 
     # ── Tease ────────────────────────────────────────────────────────────────
