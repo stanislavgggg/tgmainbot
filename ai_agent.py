@@ -19,7 +19,7 @@ from config import ANTHROPIC_KEY, AI_MAX_TOKENS
 logger = logging.getLogger(__name__)
 
 ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
-MODEL         = "claude-3-5-haiku-20241022"
+MODEL         = "claude-haiku-4-5-20251001"
 
 
 # ══════════════════════════════════════════════════════════════════════════════
