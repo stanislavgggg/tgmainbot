@@ -1,3 +1,14 @@
+"""
+bot.py — OddsVault Bot v7
+Ключевые улучшения:
+  - Убран лишний GEO-квиз (убивал конверсию)
+  - После выбора интереса → сразу AI opener → диалог
+  - Воронка: HOOK → QUIZ → WARM (AI) → TEASE (AI) → CTA → AI_CHAT
+  - handle_message теперь реагирует на ЛЮБОЙ текст на любом этапе
+  - CTA перестаёт спамить кнопку при каждом сообщении
+  - Re-engage и proactive push работают корректно
+"""
+
 import asyncio
 import logging
 import os
@@ -39,6 +50,7 @@ from storage import (
     get_ai_history,
     get_user,
     update_user,
+    mark_push_sent,
     classify_objection,
     log_objection,
     get_objections,
@@ -88,15 +100,6 @@ def _detect_lang(tg_lang_code: str | None) -> str | None:
     return _TG_LANG_MAP.get(tg_lang_code.split("-")[0].lower())
 
 
-# ── mark_push_sent (если нет в storage) ─────────────────────────────────────
-def mark_push_sent(user_id: int) -> None:
-    """Обновляет только last_push_at — не трогает last_active."""
-    update_user(
-        user_id,
-        last_push_at=datetime.now(timezone.utc).isoformat(),
-    )
-
-
 # ════════════════════════════════════════════════════════════════════════════
 #  UTILS
 # ════════════════════════════════════════════════════════════════════════════
@@ -129,50 +132,25 @@ async def _send_image(
 
 
 def _cta_keyboard(lang: str, interest: str) -> InlineKeyboardMarkup:
-    ch = CHANNELS.get(lang, CHANNELS["en"]).get(interest, CHANNELS["en"]["betting"])
+    ch = CHANNELS.get(lang, CHANNELS.get("en", {})).get(
+        interest, {"url": "https://t.me/ApuestasGuruES"}
+    )
     return InlineKeyboardMarkup([
         [InlineKeyboardButton(
-            M.CTA.get(lang, "📲 OddsVault"),
+            M.CTA.get(lang, M.CTA.get("en", "📲 OddsVault")),
             url=ch["url"],
         )],
         [InlineKeyboardButton(
-            M.CTA_BUTTON_JOINED.get(lang, "✅ Already in"),
+            M.CTA_BUTTON_JOINED.get(lang, M.CTA_BUTTON_JOINED.get("en", "✅ Already in")),
             callback_data="user_joined",
         )],
     ])
 
 
-def _geo_keyboard(lang: str) -> tuple[str, InlineKeyboardMarkup]:
-    """
-    FIX: заменяет несуществующую M.geo_quiz().
-    Простой выбор региона — универсальный для всех интересов.
-    """
-    prompts = {
-        "en": "Where are you based? This helps me find the most relevant offers for you.",
-        "es": "¿Dónde estás? Esto me ayuda a encontrar las ofertas más relevantes para ti.",
-        "hr": "Gdje si? To mi pomaže pronaći najrelevantnije ponude za tebe.",
-        "lt": "Kur esi? Tai padeda man rasti aktualiausius pasiūlymus tau.",
-        "lv": "Kur tu esi? Tas man palīdz atrast piemērotākos piedāvājumus.",
-    }
-    buttons = [
-        [InlineKeyboardButton("🇪🇸 España",   callback_data="geo_ES")],
-        [InlineKeyboardButton("🇭🇷 Hrvatska", callback_data="geo_HR")],
-        [InlineKeyboardButton("🇱🇹 Lietuva",  callback_data="geo_LT")],
-        [InlineKeyboardButton("🇱🇻 Latvija",  callback_data="geo_LV")],
-        [InlineKeyboardButton("🌍 Other / EU", callback_data="geo_EU")],
-    ]
-    text = prompts.get(lang, prompts["en"])
-    return text, InlineKeyboardMarkup(buttons)
-
-
-# ════════════════════════════════════════════════════════════════════════════
-#  ВСПОМОГАТЕЛЬНАЯ ФУНКЦИЯ: подготовить контекст для ask_valeria
-# ════════════════════════════════════════════════════════════════════════════
-
 def _prepare_valeria_context(
     user_id: int,
     user_text: str,
-) -> tuple[str, dict[str, int], list[str]]:
+) -> tuple[str, dict, list]:
     obj_type = classify_objection(user_text)
     if obj_type:
         log_objection(user_id, obj_type)
@@ -242,7 +220,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     auto_lang = _detect_lang(tg_lang)
 
     if auto_lang:
-        # Язык определён автоматически — сохраняем и сразу показываем квиз
+        # Язык из Telegram — сразу переходим к квизу
         update_user(user_id, lang=auto_lang, state=State.QUIZ)
 
         wake_text = M.WAKE_UP.get(auto_lang, M.WAKE_UP.get("en", ""))
@@ -263,7 +241,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             reply_markup=InlineKeyboardMarkup(keyboard),
         )
     else:
-        # Язык неизвестен — показываем выбор языка
+        # Язык неизвестен — показываем выбор
         update_user(user_id, state=State.LANG)
         hook_text = M.HOOK.get("en", "Hey. I'm Valeria.")
         keyboard  = [[InlineKeyboardButton(lbl, callback_data=cb)]
@@ -279,7 +257,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 # ════════════════════════════════════════════════════════════════════════════
-#  LANG / QUIZ / GEO callback handlers
+#  CALLBACK HANDLERS
 # ════════════════════════════════════════════════════════════════════════════
 
 async def lang_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -302,7 +280,7 @@ async def lang_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
 
 async def interest_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Интерес выбран → GEO квиз."""
+    """Интерес выбран → сразу AI opener → WARM1 (без GEO квиза)."""
     query   = update.callback_query
     await query.answer()
 
@@ -310,50 +288,28 @@ async def interest_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     user_id  = query.from_user.id
     user     = get_user(user_id)
     lang     = user.get("lang", "en")
-
-    # FIX: State.GEO_QUIZ → State.WARM1 (GEO_QUIZ убран, гео собирается здесь)
-    update_user(user_id, interest=interest, state=State.WARM1)
-
-    # FIX: _geo_keyboard вместо несуществующей M.geo_quiz()
-    geo_text, geo_markup = _geo_keyboard(lang)
-
-    await query.edit_message_text(
-        text=geo_text,
-        parse_mode=ParseMode.MARKDOWN,
-        reply_markup=geo_markup,
-    )
-
-
-async def geo_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Гео выбрано → AI opener → WARM1."""
-    query   = update.callback_query
-    await query.answer()
-
-    geo      = query.data[len("geo_"):]
-    user_id  = query.from_user.id
-    user     = get_user(user_id)
-    lang     = user.get("lang", "en")
-    interest = user.get("interest", "betting")
     chat_id  = query.message.chat_id
 
     update_user(
         user_id,
-        geo=geo,
+        interest=interest,
         state=State.WARM1,
         funnel_stage="warming",
         stage_replies=0,
         ai_msg_count=0,
     )
 
+    # Показываем подтверждение
     await query.edit_message_text(
-        text=M.QUIZ_ACK.get(lang, "Got it. Give me a moment... ⏳"),
+        text=M.QUIZ_ACK.get(lang, M.QUIZ_ACK.get("en", "Got it. Give me a moment... ⏳")),
         parse_mode=ParseMode.MARKDOWN,
     )
 
-    await asyncio.sleep(1.0)
+    # AI генерирует opener с web-search
+    await asyncio.sleep(0.5)
     await context.bot.send_chat_action(chat_id, "typing")
 
-    opener = await generate_warm_opener(lang=lang, interest=interest, geo=geo)
+    opener = await generate_warm_opener(lang=lang, interest=interest, geo="")
     add_ai_message(user_id, "assistant", opener)
 
     await asyncio.sleep(_typing_delay(opener) * 0.6)
@@ -393,7 +349,7 @@ async def user_joined(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
 
 # ════════════════════════════════════════════════════════════════════════════
-#  ГЛАВНЫЙ MESSAGE HANDLER — FSM диспетчер
+#  ГЛАВНЫЙ MESSAGE HANDLER
 # ════════════════════════════════════════════════════════════════════════════
 
 async def handle_message(
@@ -407,12 +363,25 @@ async def handle_message(
     state     = user.get("state")
     user_text = update.message.text.strip()
 
+    # Новый пользователь без состояния
     if state is None:
         await start(update, context)
         return
 
     lang     = user.get("lang", "en")
     interest = user.get("interest", "betting")
+
+    # На этапах LANG и QUIZ ждём кнопку, но отвечаем чтобы не молчать
+    if state in (State.LANG, State.QUIZ):
+        hints = {
+            "en": "Please choose one of the options above 👆",
+            "es": "Por favor elige una de las opciones de arriba 👆",
+            "hr": "Molim odaberi jednu od gornjih opcija 👆",
+            "lt": "Prašome pasirinkite vieną iš aukščiau esančių variantų 👆",
+            "lv": "Lūdzu izvēlies vienu no augstāk esošajām opcijām 👆",
+        }
+        await update.message.reply_text(hints.get(lang, hints["en"]))
+        return
 
     if state in (State.WARM1, State.WARM2):
         await _handle_warming(update, context, user_id, lang, interest, user_text)
@@ -422,7 +391,6 @@ async def handle_message(
         await _handle_cta(update, context, user_id, lang, interest, user_text)
     elif state in (State.AI_CHAT, State.SUBSCRIBED):
         await _handle_ai_chat(update, context, user_id, lang, interest, user_text, user)
-    # State.LANG, State.QUIZ, State.WARM1 без текста — ждём кнопку, игнорируем
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -442,6 +410,7 @@ async def _handle_warming(
     replies = get_user(user_id).get("stage_replies", 0) + 1
     update_user(user_id, stage_replies=replies)
 
+    # После 3 обменов форсируем tease
     forced_next = "tease" if replies >= 3 else None
 
     psychotype, objections, used_techniques = _prepare_valeria_context(user_id, user_text)
@@ -503,6 +472,7 @@ async def _handle_tease(
     replies = get_user(user_id).get("stage_replies", 0) + 1
     update_user(user_id, stage_replies=replies)
 
+    # После 2 обменов на tease → CTA
     forced_cta = replies >= 2
 
     psychotype, objections, used_techniques = _prepare_valeria_context(user_id, user_text)
@@ -545,7 +515,7 @@ async def _handle_tease(
 
 
 # ════════════════════════════════════════════════════════════════════════════
-#  CTA — пишет вместо кнопки
+#  CTA — пишет текст + кнопка (не спамим кнопку при каждом сообщении)
 # ════════════════════════════════════════════════════════════════════════════
 
 async def _handle_cta(
@@ -558,6 +528,7 @@ async def _handle_cta(
 ) -> None:
     chat_id = update.effective_chat.id
     history = get_ai_history(user_id)
+    user    = get_user(user_id)
 
     psychotype, objections, used_techniques = _prepare_valeria_context(user_id, user_text)
 
@@ -581,17 +552,26 @@ async def _handle_cta(
     add_ai_message(user_id, "assistant", response)
     add_tone(user_id, detect_tone(user_text, history))
 
-    await asyncio.sleep(_typing_delay(response) * 0.5)
-    await update.message.reply_text(response, parse_mode=ParseMode.MARKDOWN)
+    # Считаем сообщения на CTA этапе — кнопку показываем раз в 2 сообщения
+    cta_replies = user.get("cta_replies", 0) + 1
+    update_user(user_id, cta_replies=cta_replies)
 
-    await asyncio.sleep(3.0)
-    await context.bot.send_chat_action(chat_id, "typing")
-    await asyncio.sleep(1.2)
-    await _send_cta(context.bot, user_id, chat_id, lang, interest)
+    await asyncio.sleep(_typing_delay(response) * 0.5)
+
+    if cta_replies % 2 == 1:
+        # Сначала текст, потом кнопка
+        await update.message.reply_text(response, parse_mode=ParseMode.MARKDOWN)
+        await asyncio.sleep(2.0)
+        await context.bot.send_chat_action(chat_id, "typing")
+        await asyncio.sleep(1.0)
+        await _send_cta(context.bot, user_id, chat_id, lang, interest)
+    else:
+        # Только текст без кнопки — не надоедаем
+        await update.message.reply_text(response, parse_mode=ParseMode.MARKDOWN)
 
 
 # ════════════════════════════════════════════════════════════════════════════
-#  AI_CHAT — свободный чат после подписки
+#  AI_CHAT — свободный чат после подписки (FTD-режим)
 # ════════════════════════════════════════════════════════════════════════════
 
 async def _handle_ai_chat(
@@ -676,9 +656,9 @@ async def _handle_ai_chat(
 async def stats_command(
     update: Update, context: ContextTypes.DEFAULT_TYPE,
 ) -> None:
-    users      = get_all_users()
-    by_state:  dict[str, int] = {}
-    by_lang:   dict[str, int] = {}
+    users     = get_all_users()
+    by_state: dict[str, int] = {}
+    by_lang:  dict[str, int] = {}
     subscribed = 0
 
     for u in users:
@@ -703,7 +683,7 @@ async def stats_command(
 
 
 # ════════════════════════════════════════════════════════════════════════════
-#  PROACTIVE PUSH
+#  PROACTIVE PUSH (подписанные молчат > 6ч)
 # ════════════════════════════════════════════════════════════════════════════
 
 async def subscribed_push_job(
@@ -714,11 +694,11 @@ async def subscribed_push_job(
 
     for user in get_all_users():
         user_id      = user.get("id")
-        funnel_stage = user.get("funnel_stage", "new")
-        if funnel_stage != "subscribed":
+        if not user_id:
+            continue
+        if user.get("funnel_stage") != "subscribed":
             continue
 
-        # 1. Юзер молчит ≥ 6 ч
         last_active_str = user.get("last_active")
         if not last_active_str:
             continue
@@ -731,7 +711,6 @@ async def subscribed_push_job(
         except Exception:
             continue
 
-        # 2. Последний пуш был ≥ 6 ч назад
         last_push_str = user.get("last_push_at")
         if last_push_str:
             try:
@@ -785,7 +764,7 @@ async def subscribed_push_job(
 
 
 # ════════════════════════════════════════════════════════════════════════════
-#  RE-ENGAGE JOB
+#  RE-ENGAGE JOB (не подписались за 24/48ч)
 # ════════════════════════════════════════════════════════════════════════════
 
 async def reengage_job(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -794,6 +773,8 @@ async def reengage_job(context: ContextTypes.DEFAULT_TYPE) -> None:
 
     for user in users:
         user_id      = user.get("id")
+        if not user_id:
+            continue
         funnel_stage = user.get("funnel_stage", "new")
         lang         = user.get("lang", "en")
         interest     = user.get("interest", "betting")
@@ -816,22 +797,24 @@ async def reengage_job(context: ContextTypes.DEFAULT_TYPE) -> None:
             continue
 
         ch = (
-            CHANNELS.get(lang, CHANNELS["en"])
-            .get(interest, CHANNELS["en"]["betting"])
+            CHANNELS.get(lang, CHANNELS.get("en", {}))
+            .get(interest, {"url": "https://t.me/ApuestasGuruES"})
         )
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton(
-                M.CTA.get(lang, "📲 OddsVault"),
+                M.CTA.get(lang, M.CTA.get("en", "📲 OddsVault")),
                 url=ch["url"],
             )],
             [InlineKeyboardButton(
-                M.CTA_BUTTON_JOINED.get(lang, "✅"),
+                M.CTA_BUTTON_JOINED.get(lang, M.CTA_BUTTON_JOINED.get("en", "✅")),
                 callback_data="user_joined",
             )],
         ])
 
         if not user.get("reengage_1_sent") and elapsed >= REENGAGE_DELAY_1:
             text = M.REENGAGE_1.get(lang, M.REENGAGE_1.get("en", ""))
+            if not text:
+                continue
             try:
                 await context.bot.send_message(
                     chat_id=user_id,
@@ -850,6 +833,8 @@ async def reengage_job(context: ContextTypes.DEFAULT_TYPE) -> None:
             and elapsed >= REENGAGE_DELAY_2
         ):
             text = M.REENGAGE_2.get(lang, M.REENGAGE_2.get("en", ""))
+            if not text:
+                continue
             try:
                 await context.bot.send_message(
                     chat_id=user_id,
@@ -888,7 +873,11 @@ async def help_command(
 
 def main() -> None:
     token = os.getenv("BOT_TOKEN", BOT_TOKEN)
-    app   = Application.builder().token(token).build()
+    if not token:
+        logger.error("BOT_TOKEN is not set!")
+        sys.exit(1)
+
+    app = Application.builder().token(token).build()
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help",  help_command))
@@ -896,7 +885,6 @@ def main() -> None:
 
     app.add_handler(CallbackQueryHandler(lang_chosen,     pattern=r"^lang_"))
     app.add_handler(CallbackQueryHandler(interest_chosen, pattern=r"^int_"))
-    app.add_handler(CallbackQueryHandler(geo_chosen,      pattern=r"^geo_"))
     app.add_handler(CallbackQueryHandler(user_joined,     pattern=r"^user_joined$"))
 
     app.add_handler(MessageHandler(
@@ -906,7 +894,7 @@ def main() -> None:
     app.job_queue.run_repeating(reengage_job,        interval=30 * 60, first=60)
     app.job_queue.run_repeating(subscribed_push_job, interval=60 * 60, first=120)
 
-    logger.info("OddsVault Bot v6.0 started 🚀  Valeria is online.")
+    logger.info("OddsVault Bot v7 started 🚀  Valeria is online.")
     app.run_polling(drop_pending_updates=True)
 
 
