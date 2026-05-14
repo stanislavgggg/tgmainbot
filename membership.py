@@ -52,41 +52,46 @@ class MemberStatus(str, Enum):
 
 _CH = {
     # @ApuestasGuruES — ставки, Испания, язык испанский
+    # Chat ID из скриншота IMG_1975: -1001040179885
     "apuestas": {
         "username":   "@ApuestasGuruES",
-        "channel_id": None,  # TODO: заполнить числовой ID -100XXXXXXXXXX
+        "channel_id": -1001040179885,
         "title":      "ApuestasGuru ⚽",
         "lang":       "es",
         "topic":      "betting",
     },
     # @bet_croatia — ставки, Хорватия, язык английский
+    # Chat ID из скриншота IMG_1972: -1002655084586
     "bet_croatia": {
         "username":   "@bet_croatia",
-        "channel_id": None,  # TODO: заполнить
+        "channel_id": -1002655084586,
         "title":      "BetCroatia ⚽",
         "lang":       "en",
         "topic":      "betting",
     },
     # @luckycasinoguru — казино, Литва, язык литовский
+    # Chat ID из скриншота IMG_1971 / IMG_1970: -1003237183860
     "luckycasinoguru": {
         "username":   "@luckycasinoguru",
-        "channel_id": None,  # TODO: заполнить
+        "channel_id": -1003237183860,
         "title":      "LuckyCasino 🎰",
         "lang":       "lt",
         "topic":      "casino",
     },
     # @luckylatviaan — казино, Латвия, язык латышский
+    # Chat ID из скриншота IMG_1974: -1003910322335
     "luckylatviaan": {
         "username":   "@luckylatviaan",
-        "channel_id": None,  # TODO: заполнить
+        "channel_id": -1003910322335,
         "title":      "LuckyLatvia 🎰",
         "lang":       "lv",
         "topic":      "casino",
     },
     # @balkanjackpot — казино, Сербия+Хорватия+Балканы, язык английский
+    # Chat ID из скриншота IMG_1969: -1003522266492
     "balkanjackpot": {
         "username":   "@balkanjackpot",
-        "channel_id": None,  # TODO: заполнить
+        "channel_id": -1003522266492,
         "title":      "BalkanJackpot 🎰",
         "lang":       "en",
         "topic":      "casino",
