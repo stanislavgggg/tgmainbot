@@ -226,7 +226,7 @@ async def _web_search(query: str) -> str:
 def sanitizehistory(history: listdict) -> listdict:
     if not history:
         return 
-    sanitized = 
+    sanitized = history
     lastrole = None
     for msg in history:
         role = msg.get("role")
