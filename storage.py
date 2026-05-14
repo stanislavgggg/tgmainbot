@@ -1,12 +1,15 @@
 """
-storage.py — OddsVault Bot
-v2.0: трекинг возражений, психотипа, использованных техник.
+storage.py — OddsVault Bot v7
+Хранилище пользователей: JSON + in-memory.
+Добавлен mark_push_sent (не трогает last_active).
+Трекинг возражений, психотипа, техник.
 """
 
 import json
 import os
 import threading
 from datetime import datetime, timezone
+from typing import Optional
 
 from config import AI_MAX_HISTORY
 
@@ -42,7 +45,7 @@ OBJECTION_PATTERNS: dict[str, list[str]] = {
         "сомневаюсь", "не верится", "sounds fake", "bullshit", "really?",
     ],
     "later": [
-        "later", "después", "kasnije", "vėliau", "vēlāk",
+        "later", "después", "kasneje", "vėliau", "vēlāk",
         "потом", "позже", "не сейчас", "maybe later",
     ],
     "dont_understand": [
@@ -52,7 +55,7 @@ OBJECTION_PATTERNS: dict[str, list[str]] = {
 }
 
 
-# ── init ──────────────────────────────────────────────────────────────────────
+# ── Init ──────────────────────────────────────────────────────────────────────
 def _load() -> None:
     global _users
     if os.path.exists(_DB_FILE):
@@ -67,8 +70,10 @@ def _load() -> None:
 def _save() -> None:
     try:
         with open(_DB_FILE, "w", encoding="utf-8") as f:
-            json.dump({str(k): v for k, v in _users.items()},
-                      f, ensure_ascii=False, indent=2)
+            json.dump(
+                {str(k): v for k, v in _users.items()},
+                f, ensure_ascii=False, indent=2,
+            )
     except Exception:
         pass
 
@@ -76,7 +81,7 @@ def _save() -> None:
 _load()
 
 
-# ── базовый API ───────────────────────────────────────────────────────────────
+# ── Базовый API ───────────────────────────────────────────────────────────────
 
 def get_user(user_id: int) -> dict:
     with _lock:
@@ -93,8 +98,7 @@ def update_user(user_id: int, **kwargs) -> None:
 
 def mark_push_sent(user_id: int) -> None:
     """Записывает время последнего проактивного пуша.
-    Намеренно НЕ трогает last_active — чтобы не сбивать логику
-    «юзер сам написал vs мы написали ему».
+    НЕ трогает last_active — чтобы не сбивать логику re-engage.
     """
     with _lock:
         user = _users.setdefault(user_id, {"id": user_id})
@@ -117,7 +121,7 @@ def add_ai_message(user_id: int, role: str, content: str) -> None:
         _save()
 
 
-def get_ai_history(user_id: int) -> list[dict]:
+def get_ai_history(user_id: int) -> list:
     with _lock:
         return list(_users.get(user_id, {}).get("ai_history", []))
 
@@ -132,10 +136,9 @@ def add_tone(user_id: int, tone: str) -> None:
         _save()
 
 
-# ── возражения ────────────────────────────────────────────────────────────────
+# ── Возражения ────────────────────────────────────────────────────────────────
 
-def classify_objection(text: str) -> str | None:
-    """Возвращает тип возражения или None."""
+def classify_objection(text: str) -> Optional[str]:
     lower = text.lower()
     for obj_type, patterns in OBJECTION_PATTERNS.items():
         if any(p in lower for p in patterns):
@@ -151,12 +154,12 @@ def log_objection(user_id: int, objection_type: str) -> None:
         _save()
 
 
-def get_objections(user_id: int) -> dict[str, int]:
+def get_objections(user_id: int) -> dict:
     with _lock:
         return dict(_users.get(user_id, {}).get("objections_log", {}))
 
 
-# ── психотип ──────────────────────────────────────────────────────────────────
+# ── Психотип ──────────────────────────────────────────────────────────────────
 
 def compute_psychotype(user_id: int, latest_message: str = "") -> str:
     with _lock:
@@ -200,7 +203,7 @@ def get_psychotype(user_id: int) -> str:
         return _users.get(user_id, {}).get("psychotype", "neutral")
 
 
-# ── использованные техники ────────────────────────────────────────────────────
+# ── Использованные техники ────────────────────────────────────────────────────
 
 def log_technique(user_id: int, technique: str) -> None:
     with _lock:
@@ -211,6 +214,6 @@ def log_technique(user_id: int, technique: str) -> None:
         _save()
 
 
-def get_used_techniques(user_id: int) -> list[str]:
+def get_used_techniques(user_id: int) -> list:
     with _lock:
         return list(_users.get(user_id, {}).get("used_techniques", []))
