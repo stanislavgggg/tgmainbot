@@ -222,6 +222,10 @@ async def geo_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     opener  = await generate_warm_opener(lang=lang, interest=interest, geo=geo, user_profile=profile)
     add_ai_message(user_id, "assistant", opener)
 
+    # stage_replies=1 т.к. opener уже считается первым сообщением Валерии
+    # Это не даст повторить ту же фразу при первом ответе пользователя
+    update_user(user_id, stage_replies=1, opener_sent=True)
+
     await asyncio.sleep(_typing_delay(opener) * 0.5)
     await context.bot.send_message(chat_id=chat_id, text=opener, parse_mode=ParseMode.MARKDOWN)
 
@@ -367,6 +371,30 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if len(user_text) > 8:
         asyncio.create_task(_update_profile_silent(user_id, user_text, lang))
 
+    # ── Детектор переключения языка (в любом состоянии) ──────────────────────
+    new_lang = _detect_lang_switch(user_text)
+    if new_lang and new_lang != lang:
+        update_user(user_id, lang=new_lang)
+        lang = new_lang
+        ack_switch = {
+            "en": "Switching to English — got it. 👌",
+            "es": "Cambio al español — entendido. 👌",
+            "hr": "Prelazim na hrvatski — razumijem. 👌",
+            "lt": "Pereinu į lietuvių — suprantu. 👌",
+            "lv": "Pāreju uz latviešu — saprotu. 👌",
+        }
+        await update.message.reply_text(ack_switch.get(new_lang, "Switching language. 👌"))
+        # Если в квизе — перезапускаем кнопки на новом языке
+        if state in (State.LANG, State.QUIZ):
+            quiz_text = M.QUIZ.get(new_lang, M.QUIZ.get("en", ""))
+            btns      = M.QUIZ_BUTTONS.get(new_lang, M.QUIZ_BUTTONS.get("en", []))
+            kb        = [[InlineKeyboardButton(lbl, callback_data=cb)] for lbl, cb in btns]
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text=quiz_text, parse_mode=ParseMode.MARKDOWN,
+                reply_markup=InlineKeyboardMarkup(kb))
+        return
+
     if state in (State.LANG, State.QUIZ):
         hints = {
             "en": "Please choose one of the options above 👆",
@@ -396,6 +424,42 @@ async def _update_profile_silent(user_id, text, lang):
             logger.info(f"Profile {user_id}: {updates}")
     except Exception as e:
         logger.debug(f"Profile skip: {e}")
+
+
+def _detect_lang_switch(text: str):
+    """
+    Детектирует когда пользователь просит переключить язык.
+    Возвращает код языка или None.
+    """
+    t = text.lower().strip()
+    # English triggers
+    if any(t == p or t.startswith(p) for p in [
+        "switch to english", "english please", "speak english",
+        "in english", "change to english", "английский", "по-английски",
+    ]):
+        return "en"
+    # Spanish triggers
+    if any(t == p or t.startswith(p) for p in [
+        "switch to spanish", "en español", "español", "habla español",
+        "cambiar a español", "speak spanish",
+    ]):
+        return "es"
+    # Croatian triggers
+    if any(t == p or t.startswith(p) for p in [
+        "switch to croatian", "hrvatski", "na hrvatskom", "speak croatian",
+    ]):
+        return "hr"
+    # Lithuanian triggers
+    if any(t == p or t.startswith(p) for p in [
+        "switch to lithuanian", "lietuviškai", "lietuvių", "speak lithuanian",
+    ]):
+        return "lt"
+    # Latvian triggers
+    if any(t == p or t.startswith(p) for p in [
+        "switch to latvian", "latviešu", "latviski", "speak latvian",
+    ]):
+        return "lv"
+    return None
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -652,23 +716,44 @@ async def admin_fetch_ids(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode=ParseMode.MARKDOWN)
 
 async def debug_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Диагностика: показывает текущее состояние пользователя и наличие API key."""
+    """Диагностика: тестирует реальный вызов Anthropic API."""
     user_id = update.effective_user.id
     user    = get_user(user_id)
-    api_ok  = "✅ SET" if ANTHROPIC_KEY else "❌ MISSING — AI responses will be fallback only!"
+
+    key_status = "✅ SET" if ANTHROPIC_KEY else "❌ MISSING"
+
+    # Реальный тест API
+    api_test = "🔄 Testing..."
+    if ANTHROPIC_KEY:
+        try:
+            import httpx as _httpx
+            r = await _httpx.AsyncClient(timeout=10).post(
+                "https://api.anthropic.com/v1/messages",
+                json={"model": "claude-sonnet-4-20250514", "max_tokens": 20,
+                      "messages": [{"role":"user","content":"Reply with: OK"}]},
+                headers={"x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01",
+                         "content-type": "application/json"})
+            if r.status_code == 200:
+                api_test = "✅ API works"
+            else:
+                api_test = f"❌ API error {r.status_code}: {r.text[:120]}"
+        except Exception as e:
+            api_test = f"❌ Connection error: {e}"
+    else:
+        api_test = "❌ Skipped — no key"
+
     text = (
-        f"🔧 *Debug info*\n\n"
-        f"ANTHROPIC_KEY: {api_ok}\n"
-        f"User ID: `{user_id}`\n"
-        f"State: `{user.get('state','—')}`\n"
-        f"Funnel: `{user.get('funnel_stage','—')}`\n"
-        f"Lang: `{user.get('lang','—')}`\n"
-        f"GEO: `{user.get('geo','—')}`\n"
-        f"Interest: `{user.get('interest','—')}`\n"
-        f"Stage replies: `{user.get('stage_replies',0)}`\n"
-        f"Fallback count: `{user.get('fallback_count',0)}`\n"
-        f"Commitment sent: `{user.get('commitment_sent',False)}`\n"
-        f"AI msg count: `{user.get('ai_msg_count',0)}`"
+        f"🔧 *Debug*\n\n"
+        f"`ANTHROPIC_KEY`: {key_status}\n"
+        f"`API test`: {api_test}\n\n"
+        f"`user_id`: `{user_id}`\n"
+        f"`state`: `{user.get('state','—')}`\n"
+        f"`funnel`: `{user.get('funnel_stage','—')}`\n"
+        f"`lang`: `{user.get('lang','—')}`\n"
+        f"`geo`: `{user.get('geo','—')}`\n"
+        f"`interest`: `{user.get('interest','—')}`\n"
+        f"`stage_replies`: `{user.get('stage_replies',0)}`\n"
+        f"`fallback_count`: `{user.get('fallback_count',0)}`"
     )
     await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
 
