@@ -16,7 +16,6 @@ _users: dict[int, dict] = {}
 
 
 # ── Классификатор возражений ─────────────────────────────────────────────────
-# Каждый паттерн ловит возражение на всех 5 языках + RU
 OBJECTION_PATTERNS: dict[str, list[str]] = {
     "scam": [
         "scam", "estafa", "prevara", "krāpšana", "apgaulė",
@@ -24,7 +23,7 @@ OBJECTION_PATTERNS: dict[str, list[str]] = {
     ],
     "no_money": [
         "no money", "sin dinero", "nema novca", "nėra pinigų", "nav naudas",
-        "нет денег", "денег нет", "broke", "poor",
+        "нет денег", "денег нет", "broke",
     ],
     "no_time": [
         "no time", "sin tiempo", "nema vremena", "neturiu laiko", "nav laika",
@@ -48,7 +47,7 @@ OBJECTION_PATTERNS: dict[str, list[str]] = {
     ],
     "dont_understand": [
         "don't understand", "no entiendo", "ne razumijem", "nesuprantu", "nesaprotu",
-        "не понимаю", "что это", "explain", "what is",
+        "не понимаю", "что это",
     ],
 }
 
@@ -77,7 +76,7 @@ def _save() -> None:
 _load()
 
 
-# ── базовый API (без изменений) ───────────────────────────────────────────────
+# ── базовый API ───────────────────────────────────────────────────────────────
 
 def get_user(user_id: int) -> dict:
     with _lock:
@@ -122,7 +121,7 @@ def add_tone(user_id: int, tone: str) -> None:
         _save()
 
 
-# ── НОВОЕ: возражения ─────────────────────────────────────────────────────────
+# ── возражения ────────────────────────────────────────────────────────────────
 
 def classify_objection(text: str) -> str | None:
     """Возвращает тип возражения или None."""
@@ -134,7 +133,6 @@ def classify_objection(text: str) -> str | None:
 
 
 def log_objection(user_id: int, objection_type: str) -> None:
-    """Инкрементирует счётчик конкретного возражения."""
     with _lock:
         user = _users.setdefault(user_id, {"id": user_id})
         obj: dict = user.setdefault("objections_log", {})
@@ -147,51 +145,38 @@ def get_objections(user_id: int) -> dict[str, int]:
         return dict(_users.get(user_id, {}).get("objections_log", {}))
 
 
-# ── НОВОЕ: психотип ───────────────────────────────────────────────────────────
+# ── психотип ──────────────────────────────────────────────────────────────────
 
 def compute_psychotype(user_id: int, latest_message: str = "") -> str:
-    """
-    Определяет психотип на основе накопленных возражений и тонов.
-    Возвращает: skeptic / cynic / passive / curious / neutral
-    """
     with _lock:
-        user        = _users.get(user_id, {})
-        objections  = user.get("objections_log", {})
+        user         = _users.get(user_id, {})
+        objections   = user.get("objections_log", {})
         tone_history = user.get("tone_history", [])
 
-    scam_hits       = objections.get("scam", 0)
-    skeptic_hits    = objections.get("skeptical", 0)
-    tried_hits      = objections.get("tried_before", 0)
-    passive_hits    = (objections.get("later", 0)
-                       + objections.get("no_time", 0)
-                       + objections.get("no_money", 0))
-    disinterest     = objections.get("not_interested", 0)
+    scam_hits    = objections.get("scam", 0)
+    skeptic_hits = objections.get("skeptical", 0)
+    tried_hits   = objections.get("tried_before", 0)
+    passive_hits = (objections.get("later", 0)
+                    + objections.get("no_time", 0)
+                    + objections.get("no_money", 0))
+    disinterest  = objections.get("not_interested", 0)
 
-    neg_tones    = tone_history.count("skeptical")
-    short_tones  = tone_history.count("short")
+    neg_tones     = tone_history.count("skeptical")
+    short_tones   = tone_history.count("short")
     curious_tones = tone_history.count("curious")
 
-    # Циник: говорил «скам/обман» 2+ раз или устойчивое «не интересно» + «скам»
     if scam_hits >= 2 or (disinterest >= 2 and scam_hits >= 1):
         return "cynic"
-
-    # Скептик: активно возражает, но продолжает отвечать
     if scam_hits >= 1 or skeptic_hits >= 2 or (tried_hits >= 1 and neg_tones >= 2):
         return "skeptic"
-
-    # Пассивный: много «потом»/«некогда», короткие ответы, нет вопросов
     if passive_hits >= 2 or (short_tones >= 4 and curious_tones == 0):
         return "passive"
-
-    # Любопытный: задаёт вопросы, нет сильных возражений
     if curious_tones >= 2 or ("?" in latest_message and scam_hits == 0):
         return "curious"
-
     return "neutral"
 
 
 def update_psychotype(user_id: int, latest_message: str = "") -> str:
-    """Пересчитывает и сохраняет психотип. Возвращает текущий."""
     psychotype = compute_psychotype(user_id, latest_message)
     with _lock:
         _users.setdefault(user_id, {"id": user_id})["psychotype"] = psychotype
@@ -204,10 +189,9 @@ def get_psychotype(user_id: int) -> str:
         return _users.get(user_id, {}).get("psychotype", "neutral")
 
 
-# ── НОВОЕ: использованные техники ─────────────────────────────────────────────
+# ── использованные техники ────────────────────────────────────────────────────
 
 def log_technique(user_id: int, technique: str) -> None:
-    """Отмечает технику как использованную."""
     with _lock:
         user = _users.setdefault(user_id, {"id": user_id})
         techniques: list = user.setdefault("used_techniques", [])
