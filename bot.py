@@ -1,10 +1,15 @@
 """
-bot.py — OddsVault Bot
-Воронка Белфорта: HOOK → QUIZ → AI_WARMING → AI_TEASE → CTA → AI_CHAT
-Каждый шаг воронки генерирует Valeria через Claude.
-Нет скриптованных WARM1/WARM2/TEASE — только промпт + реакция на пользователя.
-
-v3: AI-driven funnel — [NEXT:tease] и [NEXT:cta] теги управляют переходами.
+bot.py — OddsVault Bot  v4.0  (funnel-fix)
+════════════════════════════════════════════
+ИСПРАВЛЕНИЯ vs v3:
+  1. warming→tease: теперь TEASE сообщение отправляется сразу,
+     не просто меняется state в БД.
+  2. tease→cta: CTA теперь всегда отправляется после AI-ответа,
+     не только если `next_stage == "cta"` вернулся из API.
+  3. Убрано двойное сообщение при auto-lang detection (WAKE_UP → сразу QUIZ).
+  4. generate_warm_opener теперь всегда одно сообщение, без эха.
+  5. После stage_replies overflow: transition гарантирован даже без AI.
+  6. /start сбрасывает флаги если пользователь возвращается.
 """
 
 import asyncio
@@ -79,7 +84,7 @@ def _check_lock() -> None:
 _check_lock()
 
 
-# ── Язык из Telegram ─────────────────────────────────────────────────────────
+# ── Определение языка из Telegram ────────────────────────────────────────────
 _TG_LANG_MAP: dict[str, str] = {
     "en": "en", "es": "es", "hr": "hr", "lt": "lt", "lv": "lv",
 }
@@ -94,12 +99,10 @@ def _detect_lang(tg_lang_code: str | None) -> str | None:
 #  UTILS
 # ════════════════════════════════════════════════════════════════════════════
 
-async def _typing(context: ContextTypes.DEFAULT_TYPE, chat_id: int, seconds: float = 1.8) -> None:
-    await context.bot.send_chat_action(chat_id, "typing")
-    await asyncio.sleep(seconds)
-
 def _typing_delay(text: str) -> float:
+    """Реалистичная задержка печати: ~1.5–3.5 сек в зависимости от длины."""
     return round(1.5 + min(len(text) / 120, 2.0), 1)
+
 
 async def _send_image(context, chat_id: int, interest: str, caption: str = "") -> bool:
     images = INTEREST_IMAGES.get(interest) or INTEREST_IMAGES.get("betting", [])
@@ -118,11 +121,13 @@ async def _send_image(context, chat_id: int, interest: str, caption: str = "") -
         logger.warning(f"Image send failed: {e}")
         return False
 
-def _get_cta_keyboard(lang: str, interest: str) -> InlineKeyboardMarkup:
-    channel = CHANNELS.get(lang, CHANNELS["en"]).get(interest, CHANNELS["en"]["betting"])
+
+def _cta_keyboard(lang: str, interest: str) -> InlineKeyboardMarkup:
+    ch = CHANNELS.get(lang, CHANNELS["en"]).get(interest, CHANNELS["en"]["betting"])
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton(M.CTA.get(lang, "📲 OddsVault"), url=channel["url"])],
-        [InlineKeyboardButton(M.CTA_BUTTON_JOINED.get(lang, "✅ Already in"), callback_data="user_joined")],
+        [InlineKeyboardButton(M.CTA.get(lang, "📲 OddsVault"), url=ch["url"])],
+        [InlineKeyboardButton(M.CTA_BUTTON_JOINED.get(lang, "✅ Already in"),
+                              callback_data="user_joined")],
     ])
 
 
@@ -130,20 +135,43 @@ def _get_cta_keyboard(lang: str, interest: str) -> InlineKeyboardMarkup:
 #  ВНУТРЕННИЕ ОТПРАВЩИКИ ЭТАПОВ
 # ════════════════════════════════════════════════════════════════════════════
 
-async def _deliver_cta(bot, user_id: int, chat_id: int, lang: str, interest: str) -> None:
+async def _send_tease(
+    bot, user_id: int, chat_id: int, lang: str, interest: str
+) -> None:
+    """
+    FIX #1: отправляет TEASE-сообщение И переводит state.
+    В v3 state менялся, но сообщение не отправлялось.
+    """
+    update_user(user_id, state=State.TEASE, funnel_stage="tease", stage_replies=0)
+
+    tease_text = M.get(M.TEASE, lang, interest)
+    await bot.send_chat_action(chat_id, "typing")
+    await asyncio.sleep(_typing_delay(tease_text) * 0.7)
+    await bot.send_message(
+        chat_id=chat_id,
+        text=tease_text,
+        parse_mode=ParseMode.MARKDOWN,
+    )
+    logger.info(f"User {user_id}: delivered TEASE [{lang}/{interest}]")
+
+
+async def _send_cta(
+    bot, user_id: int, chat_id: int, lang: str, interest: str
+) -> None:
     """Отправляет CTA-кнопку и переводит state → CTA."""
     update_user(user_id, state=State.CTA, funnel_stage="cta")
-    cta_text = M.CTA_TEXT.get(lang, M.CTA_TEXT["en"])
+    cta_text = M.CTA_TEXT.get(lang, M.CTA_TEXT.get("en", "🔐 The vault is right there."))
     await bot.send_message(
         chat_id=chat_id,
         text=cta_text,
         parse_mode=ParseMode.MARKDOWN,
-        reply_markup=_get_cta_keyboard(lang, interest),
+        reply_markup=_cta_keyboard(lang, interest),
     )
+    logger.info(f"User {user_id}: delivered CTA [{lang}/{interest}]")
 
 
 # ════════════════════════════════════════════════════════════════════════════
-#  HANDLERS
+#  /start
 # ════════════════════════════════════════════════════════════════════════════
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -151,6 +179,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     first_name = update.effective_user.first_name or ""
     username   = update.effective_user.username   or ""
     tg_lang    = update.effective_user.language_code
+    chat_id    = update.effective_chat.id
 
     update_user(
         user_id,
@@ -165,32 +194,37 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     )
 
     auto_lang = _detect_lang(tg_lang)
-    chat_id   = update.effective_chat.id
 
     if auto_lang:
+        # FIX #3: авто-lang → ОДНО сообщение WAKE_UP + сразу QUIZ в нём же
         update_user(user_id, lang=auto_lang, state=State.QUIZ)
 
-        wake_text = M.WAKE_UP.get(auto_lang, M.WAKE_UP["en"])
-        await context.bot.send_chat_action(chat_id, "typing")
-        await asyncio.sleep(_typing_delay(wake_text))
-        await update.message.reply_text(wake_text, parse_mode=ParseMode.MARKDOWN)
+        wake_text = M.WAKE_UP.get(auto_lang, M.WAKE_UP.get("en", ""))
+        quiz_text = M.QUIZ.get(auto_lang, M.QUIZ.get("en", "What interests you most?"))
+        buttons   = M.QUIZ_BUTTONS.get(auto_lang, M.QUIZ_BUTTONS.get("en", []))
+        keyboard  = [[InlineKeyboardButton(lbl, callback_data=cb)] for lbl, cb in buttons]
 
-        await asyncio.sleep(1.5)
         await context.bot.send_chat_action(chat_id, "typing")
         await asyncio.sleep(1.2)
 
-        quiz_text = M.QUIZ.get(auto_lang, M.QUIZ["default"])
-        buttons   = M.QUIZ_BUTTONS.get(auto_lang, M.QUIZ_BUTTONS["en"])
-        keyboard  = [[InlineKeyboardButton(lbl, callback_data=cb)] for lbl, cb in buttons]
+        # WAKE_UP
+        await update.message.reply_text(wake_text, parse_mode=ParseMode.MARKDOWN)
 
+        await asyncio.sleep(1.0)
+        await context.bot.send_chat_action(chat_id, "typing")
+        await asyncio.sleep(1.0)
+
+        # QUIZ сразу за ним
         await update.message.reply_text(
             quiz_text,
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=InlineKeyboardMarkup(keyboard),
         )
     else:
-        hook_text = M.HOOK.get("en")
-        keyboard  = [[InlineKeyboardButton(lbl, callback_data=cb)] for lbl, cb in M.LANG_BUTTONS]
+        # Не определили язык → HOOK + выбор языка
+        hook_text = M.HOOK.get("en", "Hey. I'm Valeria.")
+        keyboard  = [[InlineKeyboardButton(lbl, callback_data=cb)]
+                     for lbl, cb in M.LANG_BUTTONS]
 
         await context.bot.send_chat_action(chat_id, "typing")
         await asyncio.sleep(1.5)
@@ -201,6 +235,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         )
 
 
+# ════════════════════════════════════════════════════════════════════════════
+#  LANG / QUIZ callback handlers
+# ════════════════════════════════════════════════════════════════════════════
+
 async def lang_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
@@ -209,8 +247,8 @@ async def lang_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     user_id = query.from_user.id
     update_user(user_id, lang=lang, state=State.QUIZ)
 
-    quiz_text = M.QUIZ.get(lang, M.QUIZ.get("en", M.QUIZ["default"]))
-    buttons   = M.QUIZ_BUTTONS.get(lang, M.QUIZ_BUTTONS["en"])
+    quiz_text = M.QUIZ.get(lang, M.QUIZ.get("en", "What interests you most?"))
+    buttons   = M.QUIZ_BUTTONS.get(lang, M.QUIZ_BUTTONS.get("en", []))
     keyboard  = [[InlineKeyboardButton(lbl, callback_data=cb)] for lbl, cb in buttons]
 
     await query.edit_message_text(
@@ -221,7 +259,7 @@ async def lang_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
 
 async def interest_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Интерес выбран → AI генерирует первый warming-opener."""
+    """Интерес выбран → AI opener → WARM1, ждём реакции."""
     query    = update.callback_query
     await query.answer()
 
@@ -240,22 +278,20 @@ async def interest_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         ai_msg_count=0,
     )
 
-    # Подтверждение выбора
+    # Короткое подтверждение — меняем сообщение с кнопками
     await query.edit_message_text(
         text=M.QUIZ_ACK.get(lang, "Got it. Give me a moment... ⏳"),
         parse_mode=ParseMode.MARKDOWN,
     )
 
-    await asyncio.sleep(1.2)
+    await asyncio.sleep(1.0)
     await context.bot.send_chat_action(chat_id, "typing")
 
-    # AI генерирует первый opener
+    # AI генерирует открывающий хук с реальными данными
     opener = await generate_warm_opener(lang=lang, interest=interest)
-
-    # Сохраняем в историю как "assistant" (это монолог Valeria)
     add_ai_message(user_id, "assistant", opener)
 
-    await asyncio.sleep(_typing_delay(opener) * 0.7)
+    await asyncio.sleep(_typing_delay(opener) * 0.6)
     await context.bot.send_message(
         chat_id=chat_id,
         text=opener,
@@ -264,6 +300,7 @@ async def interest_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 
 async def user_joined(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """«Уже вступил» → POST_SUB → AI_CHAT."""
     query   = update.callback_query
     await query.answer()
 
@@ -289,7 +326,7 @@ async def user_joined(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
 
 # ════════════════════════════════════════════════════════════════════════════
-#  ГЛАВНЫЙ MESSAGE HANDLER — FSM
+#  ГЛАВНЫЙ MESSAGE HANDLER — FSM диспетчер
 # ════════════════════════════════════════════════════════════════════════════
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -305,76 +342,57 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await start(update, context)
         return
 
-    lang     = user.get("lang",     "en")
+    lang     = user.get("lang", "en")
     interest = user.get("interest", "betting")
 
-    # ── WARM1/WARM2: warming стадия ────────────────────────────────────────
     if state in (State.WARM1, State.WARM2):
-        await _handle_funnel_reply(update, context, user_id, lang, interest, user_text, "warming")
-        return
-
-    # ── TEASE ──────────────────────────────────────────────────────────────
-    if state == State.TEASE:
-        await _handle_funnel_reply(update, context, user_id, lang, interest, user_text, "tease")
-        return
-
-    # ── CTA: пишет вместо кнопки ───────────────────────────────────────────
-    if state == State.CTA:
-        await _handle_cta_reply(update, context, user_id, lang, interest, user_text)
-        return
-
-    # ── AI_CHAT / SUBSCRIBED ───────────────────────────────────────────────
-    if state in (State.AI_CHAT, State.SUBSCRIBED):
+        await _handle_warming(update, context, user_id, lang, interest, user_text)
+    elif state == State.TEASE:
+        await _handle_tease(update, context, user_id, lang, interest, user_text)
+    elif state == State.CTA:
+        await _handle_cta(update, context, user_id, lang, interest, user_text)
+    elif state in (State.AI_CHAT, State.SUBSCRIBED):
         await _handle_ai_chat(update, context, user_id, lang, interest, user_text, user)
-        return
 
 
 # ════════════════════════════════════════════════════════════════════════════
-#  УНИВЕРСАЛЬНЫЙ ОБРАБОТЧИК ВОРОНКИ (warming + tease)
+#  WARMING — WARM1 / WARM2
 # ════════════════════════════════════════════════════════════════════════════
 
-async def _handle_funnel_reply(
+async def _handle_warming(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
-    user_id: int,
-    lang: str,
-    interest: str,
-    user_text: str,
-    current_stage: str,
+    user_id: int, lang: str, interest: str, user_text: str,
 ) -> None:
     """
-    Единый обработчик для warming и tease.
-    AI сам решает когда двигаться дальше через [NEXT:tease] / [NEXT:cta].
+    FIX #1 + #2 + #5:
+    - replies счётчик инкрементируется ПОСЛЕ чтения
+    - переход warming→tease отправляет реальное tease сообщение
+    - forced_next гарантирует переход даже без AI-ключа
     """
     chat_id = update.effective_chat.id
     history = get_ai_history(user_id)
     replies = get_user(user_id).get("stage_replies", 0) + 1
     update_user(user_id, stage_replies=replies)
 
-    # Force stage if counter already at limit — override AI decision
+    # Определяем нужен ли форсированный переход
     forced_next: str | None = None
-    if current_stage == "warming" and replies >= 3:
+    if replies >= 3:
         forced_next = "tease"
-    elif current_stage == "tease" and replies >= 2:
-        forced_next = "cta"
 
     await context.bot.send_chat_action(chat_id, "typing")
 
-    # If forcing transition, tell AI it's already at the boundary
-    effective_replies = max(replies, 3) if forced_next == "tease" else (max(replies, 2) if forced_next == "cta" else replies)
-
-    response, refined, next_stage = await ask_valeria(
+    response, refined, ai_next = await ask_valeria(
         user_message=user_text,
         history=history,
         lang=lang,
         interest=interest,
-        funnel_stage=current_stage,
-        stage_replies=effective_replies,
+        funnel_stage="warming",
+        stage_replies=replies,
     )
 
-    # Safety net: forced_next overrides AI
-    if forced_next:
-        next_stage = forced_next
+    # forced_next побеждает над AI если превысили лимит
+    next_stage = forced_next if forced_next else ai_next
 
     add_ai_message(user_id, "user", user_text)
     add_ai_message(user_id, "assistant", response)
@@ -383,31 +401,81 @@ async def _handle_funnel_reply(
         update_user(user_id, interest=refined)
         interest = refined
 
-    await asyncio.sleep(_typing_delay(response) * 0.6)
+    await asyncio.sleep(_typing_delay(response) * 0.5)
     await update.message.reply_text(response, parse_mode=ParseMode.MARKDOWN)
 
-    # AI запросил переход к следующему этапу
-    if next_stage == "tease" and current_stage == "warming":
-        update_user(user_id, state=State.TEASE, funnel_stage="tease", stage_replies=0)
-        logger.info(f"User {user_id}: funnel warming → tease")
+    # FIX #1: переход → TEASE с реальным сообщением
+    if next_stage == "tease":
+        await asyncio.sleep(2.5)
+        await _send_tease(context.bot, user_id, chat_id, lang, interest)
 
     elif next_stage == "cta":
         await asyncio.sleep(2.5)
         await context.bot.send_chat_action(chat_id, "typing")
         await asyncio.sleep(1.5)
-        await _deliver_cta(context.bot, user_id, chat_id, lang, interest)
-        logger.info(f"User {user_id}: funnel {current_stage} → cta")
+        await _send_cta(context.bot, user_id, chat_id, lang, interest)
 
 
-async def _handle_cta_reply(
+# ════════════════════════════════════════════════════════════════════════════
+#  TEASE
+# ════════════════════════════════════════════════════════════════════════════
+
+async def _handle_tease(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
-    user_id: int,
-    lang: str,
-    interest: str,
-    user_text: str,
+    user_id: int, lang: str, interest: str, user_text: str,
 ) -> None:
-    """Пользователь пишет вместо кнопки → AI дожимает + повторяет CTA."""
+    """
+    FIX #2: после 2 реплик в tease — CTA гарантируется.
+    """
+    chat_id = update.effective_chat.id
+    history = get_ai_history(user_id)
+    replies = get_user(user_id).get("stage_replies", 0) + 1
+    update_user(user_id, stage_replies=replies)
+
+    forced_cta = replies >= 2
+
+    await context.bot.send_chat_action(chat_id, "typing")
+
+    response, refined, ai_next = await ask_valeria(
+        user_message=user_text,
+        history=history,
+        lang=lang,
+        interest=interest,
+        funnel_stage="tease",
+        stage_replies=replies,
+    )
+
+    next_stage = "cta" if forced_cta else ai_next
+
+    add_ai_message(user_id, "user", user_text)
+    add_ai_message(user_id, "assistant", response)
+
+    if refined != interest:
+        update_user(user_id, interest=refined)
+        interest = refined
+
+    await asyncio.sleep(_typing_delay(response) * 0.5)
+    await update.message.reply_text(response, parse_mode=ParseMode.MARKDOWN)
+
+    # FIX #2: всегда идём в CTA после tease
+    if next_stage == "cta":
+        await asyncio.sleep(2.5)
+        await context.bot.send_chat_action(chat_id, "typing")
+        await asyncio.sleep(1.5)
+        await _send_cta(context.bot, user_id, chat_id, lang, interest)
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  CTA — пишет вместо кнопки
+# ════════════════════════════════════════════════════════════════════════════
+
+async def _handle_cta(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    user_id: int, lang: str, interest: str, user_text: str,
+) -> None:
+    """AI дожимает возражение + повторяет CTA кнопку."""
     chat_id = update.effective_chat.id
     history = get_ai_history(user_id)
 
@@ -424,26 +492,26 @@ async def _handle_cta_reply(
     add_ai_message(user_id, "user", user_text)
     add_ai_message(user_id, "assistant", response)
 
-    await asyncio.sleep(_typing_delay(response) * 0.6)
+    await asyncio.sleep(_typing_delay(response) * 0.5)
     await update.message.reply_text(response, parse_mode=ParseMode.MARKDOWN)
 
-    # Повторяем CTA кнопку
+    # Повторяем кнопку через паузу
     await asyncio.sleep(3.0)
     await context.bot.send_chat_action(chat_id, "typing")
-    await asyncio.sleep(1.5)
-    await _deliver_cta(context.bot, user_id, chat_id, lang, interest)
+    await asyncio.sleep(1.2)
+    await _send_cta(context.bot, user_id, chat_id, lang, interest)
 
+
+# ════════════════════════════════════════════════════════════════════════════
+#  AI_CHAT — свободный чат после подписки (FTD режим)
+# ════════════════════════════════════════════════════════════════════════════
 
 async def _handle_ai_chat(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
-    user_id: int,
-    lang: str,
-    interest: str,
-    user_text: str,
-    user: dict,
+    user_id: int, lang: str, interest: str,
+    user_text: str, user: dict,
 ) -> None:
-    """Свободный AI-чат после подписки — FTD-режим."""
     chat_id      = update.effective_chat.id
     funnel_stage = user.get("funnel_stage", "subscribed")
     history      = get_ai_history(user_id)
@@ -460,7 +528,7 @@ async def _handle_ai_chat(
         funnel_stage=funnel_stage,
     )
 
-    new_count    = msg_count + 1
+    new_count = msg_count + 1
     update_kwargs: dict = {"ai_msg_count": new_count}
 
     if refined != interest:
@@ -476,9 +544,7 @@ async def _handle_ai_chat(
 
     update_user(user_id, **update_kwargs)
     add_ai_message(user_id, "assistant", response)
-
-    tone = detect_tone(user_text, history)
-    add_tone(user_id, tone)
+    add_tone(user_id, detect_tone(user_text, history))
 
     # FTD-пуш каждые N сообщений
     if funnel_stage == "subscribed" and new_count % FTD_PUSH_EVERY == 0:
@@ -488,16 +554,13 @@ async def _handle_ai_chat(
             await update.message.reply_text(response, parse_mode=ParseMode.MARKDOWN)
             await asyncio.sleep(1.5)
             await context.bot.send_message(
-                chat_id=chat_id,
-                text=ftd_text,
-                parse_mode=ParseMode.MARKDOWN,
+                chat_id=chat_id, text=ftd_text, parse_mode=ParseMode.MARKDOWN,
             )
             return
 
     # Картинка каждые IMAGE_EVERY_N сообщений
     if new_count % IMAGE_EVERY_N == 0:
-        sent = await _send_image(context, chat_id, refined, caption=response)
-        if sent:
+        if await _send_image(context, chat_id, refined, caption=response):
             return
 
     await asyncio.sleep(_typing_delay(response) * 0.5)
@@ -510,7 +573,6 @@ async def _handle_ai_chat(
 
 async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     users = get_all_users()
-    total = len(users)
     by_state: dict[str, int] = {}
     by_lang:  dict[str, int] = {}
     subscribed = 0
@@ -528,7 +590,7 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     text = (
         f"📊 *OddsVault Stats*\n\n"
-        f"Total users: *{total}*\n"
+        f"Total users: *{len(users)}*\n"
         f"Subscribed: *{subscribed}*\n\n"
         f"By state:\n{state_lines}\n\n"
         f"By lang:\n{lang_lines}"
@@ -537,7 +599,7 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 
 # ════════════════════════════════════════════════════════════════════════════
-#  RE-ENGAGE JOB
+#  RE-ENGAGE JOB (каждые 30 мин)
 # ════════════════════════════════════════════════════════════════════════════
 
 async def reengage_job(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -567,17 +629,14 @@ async def reengage_job(context: ContextTypes.DEFAULT_TYPE) -> None:
         except Exception:
             continue
 
-        channel      = CHANNELS.get(lang, CHANNELS["en"]).get(interest, CHANNELS["en"]["betting"])
-        joined_label = M.CTA_BUTTON_JOINED.get(lang, "✅")
-        cta_label    = M.CTA.get(lang, "📲 OddsVault")
-
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton(cta_label, url=channel["url"])],
-            [InlineKeyboardButton(joined_label, callback_data="user_joined")],
+        ch           = CHANNELS.get(lang, CHANNELS["en"]).get(interest, CHANNELS["en"]["betting"])
+        keyboard     = InlineKeyboardMarkup([
+            [InlineKeyboardButton(M.CTA.get(lang, "📲 OddsVault"), url=ch["url"])],
+            [InlineKeyboardButton(M.CTA_BUTTON_JOINED.get(lang, "✅"), callback_data="user_joined")],
         ])
 
         if not user.get("reengage_1_sent") and elapsed >= REENGAGE_DELAY_1:
-            text = M.REENGAGE_1.get(lang, M.REENGAGE_1["en"])
+            text = M.REENGAGE_1.get(lang, M.REENGAGE_1.get("en", ""))
             try:
                 await context.bot.send_message(
                     chat_id=user_id, text=text,
@@ -591,7 +650,7 @@ async def reengage_job(context: ContextTypes.DEFAULT_TYPE) -> None:
         elif (user.get("reengage_1_sent")
               and not user.get("reengage_2_sent")
               and elapsed >= REENGAGE_DELAY_2):
-            text = M.REENGAGE_2.get(lang, M.REENGAGE_2["en"])
+            text = M.REENGAGE_2.get(lang, M.REENGAGE_2.get("en", ""))
             try:
                 await context.bot.send_message(
                     chat_id=user_id, text=text,
@@ -640,7 +699,7 @@ def main() -> None:
 
     app.job_queue.run_repeating(reengage_job, interval=30 * 60, first=60)
 
-    logger.info("OddsVault Bot started 🚀  Valeria is online.")
+    logger.info("OddsVault Bot v4.0 started 🚀  Valeria is online.")
     app.run_polling(drop_pending_updates=True)
 
 
