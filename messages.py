@@ -333,7 +333,7 @@ WARM2: dict[str, str] = {
         "Miguel (Sevilla): *«Llevo 3 semanas siguiendo las señales. No cambio nada, "
         "solo añado contexto al análisis que ya hacía. Noto la diferencia.»*\n\n"
         "Andris (Riga): *«El bono sin wagering que encontrasteis me salvó el mes de enero.»*\n\n"
-        "Keine promesas. Solo personas reales que encontraron algo útil.\n\n"
+        "Sin promesas. Solo personas reales que encontraron algo útil.\n\n"
         "¿Qué estás buscando tú ahora mismo — señales, bonos, análisis?"
     ),
     "hr": (
@@ -780,12 +780,14 @@ REENGAGE_2: dict[str, str] = {
 # ══════════════════════════════════════════════════════════════════════════════
 INTEREST_SHIFT: dict[str, dict[str, str]] = {
     "betting_to_casino": {
+        "en": "Got it — sounds like casino content fits you better. Let me point you to where that lives. 🎰",
         "es": "Entendido — te mando al canal de casino donde está lo más relevante para ti. 🎰",
         "hr": "Razumijem — šaljem te na casino kanal gdje je najrelevantnije za tebe. 🎰",
         "lt": "Supratau — siunčiu tave į kazino kanalą kur tau labiausiai aktualu. 🎰",
         "lv": "Sapratu — sūtu tevi uz kazino kanālu kur tev visaktuālākais. 🎰",
     },
     "casino_to_betting": {
+        "en": "Makes sense — sports feels like a better fit for you. Here's where the value signals are. ⚽",
         "es": "Veo que el deporte te tira más — aquí las señales de valor. ⚽",
         "hr": "Vidim da te sport više privlači — ovdje su signali vrijednosti. ⚽",
         "lt": "Matau, kad sportas jus labiau traukia — čia vertės signalai. ⚽",
