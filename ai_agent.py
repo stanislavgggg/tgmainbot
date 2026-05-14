@@ -188,28 +188,7 @@ VALERIA: Got it. I'll only reach out if something genuinely unusual comes up —
 
 
 # ── Web search ────────────────────────────────────────────────────────────────
-
-async def _web_search(query: str) -> str:
-    if not ANTHROPIC_KEY:
-        return ""
-    try:
-        payload = {
-            "model":      MODEL,
-            "max_tokens": 1024,
-            "tools": [{
-                "type":     "web_search_20250305",
-                "name":     "web_search",
-                "max_uses": 2,
-            }],
-            "messages": [{"role": "user", "content": query}],
-        }
-        headers = {
-            "x-api-key":         ANTHROPIC_KEY,
-            "anthropic-version": "2023-06-01",
-            "anthropic-beta":    "web-search-2025-03-05",
-            "content-type":      "application/json",
-}
-  async def _web_search(query: str) -> str:
+ async def _web_search(query: str) -> str:
     if not ANTHROPIC_KEY:
         return ""
     try:
