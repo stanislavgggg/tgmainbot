@@ -209,14 +209,34 @@ async def _web_search(query: str) -> str:
             "anthropic-beta":    "web-search-2025-03-05",
             "content-type":      "application/json",
 }
+  async def _web_search(query: str) -> str:
+    if not ANTHROPIC_KEY:
+        return ""
+    try:
+        payload = {
+            "model":      MODEL,
+            "max_tokens": 1024,
+            "tools": [{
+                "type":     "web_search_20250305",
+                "name":     "web_search",
+                "max_uses": 2,
+            }],
+            "messages": [{"role": "user", "content": query}],
+        }
+        headers = {
+            "x-api-key":         ANTHROPIC_KEY,
+            "anthropic-version": "2023-06-01",
+            "anthropic-beta":    "web-search-2025-03-05",
+            "content-type":      "application/json",
+        }
         async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.post(ANTHROPICURL, json=payload, headers=headers)
-            if resp.statuscode != 200:
+            resp = await client.post(ANTHROPIC_URL, json=payload, headers=headers)
+            if resp.status_code != 200:
                 return ""
             data = resp.json()
-            for block in data.get("content", ):
+            for block in data.get("content", []):
                 if block.get("type") == "text":
-                    return block"text":800
+                    return block["text"][:800]
     except Exception:
         return ""
     return ""
