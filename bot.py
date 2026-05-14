@@ -734,7 +734,7 @@ async def subscribed_push_job(
         # 2. Последний пуш был ≥ 6 ч назад
         last_push_str = user.get("last_push_at")
         if last_push_str:
-        try:
+            try:
                 last_push_ts = datetime.fromisoformat(last_push_str)
                 if last_push_ts.tzinfo is None:
                     last_push_ts = last_push_ts.replace(tzinfo=timezone.utc)
