@@ -233,7 +233,9 @@ async def _run_with_search(system, messages, headers, max_loops=3) -> str:
     async with httpx.AsyncClient(timeout=40) as client:
         for _ in range(max_loops):
             resp = await client.post(ANTHROPIC_URL, json=payload, headers=headers)
-            resp.raise_for_status()
+            if resp.status_code != 200:
+                logger.error(f"Anthropic API error {resp.status_code}: {resp.text[:300]}")
+                resp.raise_for_status()
             data = resp.json()
             stop_reason, last_content = data.get("stop_reason"), data.get("content",[])
             if stop_reason == "end_turn": return _strip_thinking(_extract_text(last_content))
