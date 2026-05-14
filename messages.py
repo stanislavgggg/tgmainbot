@@ -16,47 +16,37 @@ HOOK: dict[str, str] = {
     "en": (
         "Hey.\n\n"
         "Not sure if you got here by chance or by instinct — but your timing is good. 🎯\n\n"
-        "I'm *Valeria* — I spent 4 years tracking odds, bonuses and signals across European markets. "
-        "Built this bot so I can share what I find with more people at once.\n\n"
-        "I'm not selling anything. No subscriptions, no fees. "
-        "I just drop what I find into a channel — and people are already making the most of it.\n\n"
-        "Which language do you want to continue in?"
+        "I'm *Valeria* — I track odds, bonuses and signals across European markets. "
+        "Built this so I can share what I find with more people at once.\n\n"
+        "No subscriptions, no fees. I just drop what I find — and the people in the right place catch it first."
     ),
     "es": (
         "Oye.\n\n"
         "No sé si llegaste aquí por suerte o por instinto — pero llegas en buen momento. 🎯\n\n"
-        "Soy *Valeria* — llevo 4 años rastreando odds, bonos y señales en los mercados de España y Balcanes. "
-        "Creé este bot para poder compartir lo que encuentro con más gente a la vez.\n\n"
-        "No vendo nada. Sin suscripciones, sin tarifas. "
-        "Solo comparto lo que encuentro en un canal — y hay gente que ya está sacando partido de ello.\n\n"
-        "¿En qué idioma seguimos?"
+        "Soy *Valeria* — rastro odds, bonos y señales en los mercados europeos. "
+        "Creé esto para poder compartir lo que encuentro con más gente a la vez.\n\n"
+        "Sin suscripciones, sin tarifas. Solo comparto lo que encuentro — y los que están en el lugar correcto lo captan primero."
     ),
     "hr": (
         "Hej.\n\n"
         "Ne znam jesi li ovdje slučajno ili instinktom — ali dolaziš u pravo vrijeme. 🎯\n\n"
-        "Ja sam *Valerija* — 4 godine pratim kvote, bonuse i signale na tržištima Hrvatske i Baltika. "
-        "Napravila sam ovog bota da mogu dijeliti što pronađem s više ljudi odjednom.\n\n"
-        "Ništa ne prodajem. Bez pretplata, bez naknada. "
-        "Samo dijelim ono što pronađem u kanalu — i ima ljudi koji već izvlače korist iz toga.\n\n"
-        "Na kojem jeziku nastavljamo?"
+        "Ja sam *Valerija* — pratim kvote, bonuse i signale na europskim tržištima. "
+        "Napravila sam ovo da mogu dijeliti što pronađem s više ljudi odjednom.\n\n"
+        "Bez pretplata, bez naknada. Samo dijelim ono što pronađem — i ljudi koji su na pravom mjestu to uhvate prvi."
     ),
     "lt": (
         "Sveiki.\n\n"
         "Nežinau ar atkeliavote čia atsitiktinai ar instinktu — bet atvykstate geru laiku. 🎯\n\n"
-        "Aš esu *Valerija* — 4 metus seku koeficientus, bonusus ir signalus Ispanijos ir Baltijos rinkose. "
-        "Sukūriau šį botą, kad galėčiau dalintis tuo, ką randu, su daugiau žmonių vienu metu.\n\n"
-        "Nieko neparduodu. Jokių prenumeratų, jokių mokesčių. "
-        "Tiesiog dalinausi tuo, ką randu kanale — ir jau yra žmonių, kurie iš to gauna naudos.\n\n"
-        "Kuria kalba tęsiame?"
+        "Aš esu *Valerija* — seku koeficientus, bonusus ir signalus Europos rinkose. "
+        "Sukūriau tai, kad galėčiau dalintis tuo, ką randu, su daugiau žmonių vienu metu.\n\n"
+        "Jokių prenumeratų, jokių mokesčių. Tiesiog dalinausi tuo, ką randu — ir žmonės tinkamoje vietoje tai sugauna pirmieji."
     ),
     "lv": (
         "Sveiki.\n\n"
         "Nezinu, vai esat šeit nejauši vai instinktīvi — bet ierodaties īstajā laikā. 🎯\n\n"
-        "Es esmu *Valerija* — 4 gadus seku koeficientiem, bonusiem un signāliem Spānijas un Baltijas tirgos. "
-        "Izveidoju šo botu, lai varētu dalīties ar to, ko atrodu, ar vairāk cilvēkiem vienlaikus.\n\n"
-        "Es neko nepārdodu. Nav abonementu, nav maksas. "
-        "Vienkārši dalūos ar to, ko atrodu kanālā — un jau ir cilvēki, kas no tā gūst labumu.\n\n"
-        "Kurā valodā turpinām?"
+        "Es esmu *Valerija* — seku koeficientiem, bonusiem un signāliem Eiropas tirgos. "
+        "Izveidoju to, lai varētu dalīties ar to, ko atrodu, ar vairāk cilvēkiem vienlaikus.\n\n"
+        "Nav abonementu, nav maksas. Vienkārši dalūos ar to, ko atrodu — un cilvēki pareizajā vietā to uztver pirmie."
     ),
 }
 
