@@ -8,24 +8,24 @@ from enum import Enum
 
 
 # ── Токены ──────────────────────────────────────────────────────────────────
-BOT_TOKEN      = os.getenv("BOT_TOKEN",      "8840016683:AAFRXj04QarjrC0OfVefeCTCaTWz4HnO6Sk")
-ANTHROPIC_KEY  = os.getenv("ANTHROPIC_API_KEY", "")   # ← обязателен для AI-чата
+BOT_TOKEN      = os.getenv("BOT_TOKEN",      "")
+ANTHROPIC_KEY  = os.getenv("ANTHROPIC_API_KEY", "")
 
 
 # ── FSM States ───────────────────────────────────────────────────────────────
 class State(str, Enum):
-    LANG       = "lang"        # выбор языка
-    QUIZ       = "quiz"        # выбор интереса
-    WARM1      = "warm1"       # прогрев 1 — ждём реакции
-    WARM2      = "warm2"       # прогрев 2 — ждём реакции
-    TEASE      = "tease"       # тизер    — ждём реакции
-    CTA        = "cta"         # кнопка канала
-    SUBSCRIBED = "subscribed"  # «Уже вступил»
-    AI_CHAT    = "ai_chat"     # свободный AI-чат (FTD-режим)
+    LANG       = "lang"
+    QUIZ       = "quiz"
+    WARM1      = "warm1"
+    WARM2      = "warm2"
+    TEASE      = "tease"
+    CTA        = "cta"
+    SUBSCRIBED = "subscribed"
+    AI_CHAT    = "ai_chat"
 
 
 # ── Каналы ───────────────────────────────────────────────────────────────────
-# url — основной, extra_url — опциональный второй
+# FIX: добавлен "en" — без него KeyError при CTA у англоязычных юзеров
 CHANNELS: dict[str, dict[str, dict]] = {
     "en": {
         "betting":   {"url": "https://t.me/ApuestasGuruES",  "extra_url": ""},
@@ -61,11 +61,11 @@ CHANNELS: dict[str, dict[str, dict]] = {
 
 
 # ── Re-engage тайминги (секунды) ─────────────────────────────────────────────
-REENGAGE_DELAY_1 = 24 * 3600    # 24 ч
-REENGAGE_DELAY_2 = 48 * 3600    # 48 ч
+REENGAGE_DELAY_1 = 24 * 3600
+REENGAGE_DELAY_2 = 48 * 3600
 
 
-# ── Картинки по интересам (добавь свои файлы в папку images/) ────────────────
+# ── Картинки по интересам ────────────────────────────────────────────────────
 INTEREST_IMAGES: dict[str, list[str]] = {
     "betting":   [],
     "casino":    [],
@@ -74,8 +74,8 @@ INTEREST_IMAGES: dict[str, list[str]] = {
 }
 
 
-# ── AI-чат: FTD пуш каждые N сообщений ─────────────────────────────────────
+# ── AI-чат ───────────────────────────────────────────────────────────────────
 FTD_PUSH_EVERY  = 5
 IMAGE_EVERY_N   = 4
-AI_MAX_HISTORY  = 20     # сколько сообщений хранить в истории
-AI_MAX_TOKENS   = 350    # max tokens в ответе Valeria
+AI_MAX_HISTORY  = 20
+AI_MAX_TOKENS   = 350
