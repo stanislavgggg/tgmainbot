@@ -45,10 +45,6 @@ def _strip_thinking(text: str) -> str:
         return text
     lines = [l for l in text.split("\n") if not _THINKING_RE.search(l)]
     return " ".join(lines).strip()
-
-
-# ── Geo search queries ────────────────────────────────────────────────────────
-
 def _geo_search_queries(interest: str, geo: str) -> list[str]:
     base = {
         "betting": [
@@ -212,9 +208,8 @@ async def _web_search(query: str) -> str:
             "anthropic-version": "2023-06-01",
             "anthropic-beta":    "web-search-2025-03-05",
             "content-type":      "application/json",
-
-
-}async with httpx.AsyncClient(timeout=15) as client:
+}
+        async with httpx.AsyncClient(timeout=15) as client:
             resp = await client.post(ANTHROPICURL, json=payload, headers=headers)
             if resp.statuscode != 200:
                 return ""
