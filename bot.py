@@ -216,8 +216,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     auto_lang = _detect_lang(tg_lang)
 
     if auto_lang:
-        update_user(user_id, lang=auto_lang, state=State.QUIZ)
-
+update_user(user_id, interest=interest, state=State.WARM1)
         wake_text = M.WAKE_UP.get(auto_lang, M.WAKE_UP.get("en", ""))
         quiz_text = M.QUIZ.get(auto_lang, M.QUIZ.get("en", "What interests you most?"))
         buttons   = M.QUIZ_BUTTONS.get(auto_lang, M.QUIZ_BUTTONS.get("en", []))
