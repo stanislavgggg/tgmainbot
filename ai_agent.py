@@ -188,7 +188,7 @@ VALERIA: Got it. I'll only reach out if something genuinely unusual comes up —
 
 
 # ── Web search ────────────────────────────────────────────────────────────────
- async def _web_search(query: str) -> str:
+async def _web_search(query: str) -> str:
     if not ANTHROPIC_KEY:
         return ""
     try:
