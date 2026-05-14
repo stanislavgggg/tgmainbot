@@ -94,21 +94,33 @@ async def _send_cta(bot, user_id, chat_id, lang, interest, geo):
 
 
 # ════════════════════════════════════════════════════════════════════════════
-#  /start — HOOK (знакомство) → QUIZ (интерес)
-#  ВАЖНО: два отдельных сообщения с паузой между ними
+#  /start — HOOK с картинкой + кнопки языков → QUIZ (интерес)
+#
+#  Картинка: положи файл valeria_hook.png в корень проекта рядом с bot.py
+#  Или используй HOOK_IMAGE_URL (прямая ссылка на картинку).
+#
+#  Поток: send_photo(caption=HOOK, кнопки языков) → пользователь выбирает
+#  язык → lang_chosen → QUIZ → interest_chosen → GEO-квиз → geo_chosen → AI
 # ════════════════════════════════════════════════════════════════════════════
+
+# Путь к картинке (лежит рядом с bot.py в репо)
+HOOK_IMAGE_PATH = os.path.join(os.path.dirname(__file__), "valeria_hook.png")
+
+# Fallback: прямой URL если файл не найден (замени на свой хостинг)
+HOOK_IMAGE_URL  = "https://raw.githubusercontent.com/stanislavgggg/tgmainbot/4891019e49ee730aad0db5bcd065708a1b44c471/1name.png"
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id    = update.effective_user.id
     first_name = update.effective_user.first_name or ""
     tg_lang    = update.effective_user.language_code
     chat_id    = update.effective_chat.id
 
-    # Определяем язык из tg_lang (уточним после GEO-квиза)
+    # Язык из tg_lang (уточним после GEO-квиза)
     geo_hint = infer_geo_from_tg_lang(tg_lang) or "OTHER"
     lang     = resolve_lang(geo_hint, tg_lang)
 
     update_user(user_id,
-        state=State.QUIZ, funnel_stage="new",
+        state=State.LANG, funnel_stage="new",
         first_name=first_name,
         username=update.effective_user.username or "",
         lang=lang, geo=geo_hint,
@@ -117,26 +129,65 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         commitment_sent=False, cta_replies=0,
         fallback_count=0,
     )
-
     logger.info(f"START user={user_id} lang={lang} geo={geo_hint} tg_lang={tg_lang}")
 
-    # Шаг 1: HOOK — знакомство с Валерией
-    hook_text = M.HOOK.get(lang, M.HOOK.get("en", "Hey. I'm Valeria."))
-    await context.bot.send_chat_action(chat_id, "typing")
-    await asyncio.sleep(1.5)
-    await update.message.reply_text(hook_text, parse_mode=ParseMode.MARKDOWN)
+    # HOOK текст всегда на английском (кнопки языков идут следом)
+    hook_text = (
+        "Hey.\n\n"
+        "Not sure if you got here by chance or by instinct — but your timing is good. 🎯\n\n"
+        "I'm *Valeria* — I spent 4 years tracking odds, bonuses and signals across European markets. "
+        "Built this bot so I can share what I find with more people at once.\n\n"
+        "I'm not selling anything. No subscriptions, no fees. "
+        "I just drop what I find into a channel — and people are already making the most of it.\n\n"
+        "Which language do you want to continue in?"
+    )
 
-    # Шаг 2: QUIZ — что интересует (пауза для естественности)
-    await asyncio.sleep(1.2)
-    await context.bot.send_chat_action(chat_id, "typing")
-    await asyncio.sleep(1.0)
+    # Кнопки выбора языка
+    lang_kb = [[InlineKeyboardButton(lbl, callback_data=cb)] for lbl, cb in M.LANG_BUTTONS]
+    markup  = InlineKeyboardMarkup(lang_kb)
 
-    quiz_text = M.QUIZ.get(lang, M.QUIZ.get("en", "What interests you most?"))
-    btns      = M.QUIZ_BUTTONS.get(lang, M.QUIZ_BUTTONS.get("en", []))
-    kb        = [[InlineKeyboardButton(lbl, callback_data=cb)] for lbl, cb in btns]
-    await update.message.reply_text(
-        quiz_text, parse_mode=ParseMode.MARKDOWN,
-        reply_markup=InlineKeyboardMarkup(kb))
+    await asyncio.sleep(0.8)
+
+    # Отправляем ОДНИМ постом: фото + caption + кнопки
+    sent = False
+
+    # Сначала пробуем файл из репо
+    if os.path.exists(HOOK_IMAGE_PATH):
+        try:
+            with open(HOOK_IMAGE_PATH, "rb") as photo:
+                await context.bot.send_photo(
+                    chat_id=chat_id,
+                    photo=photo,
+                    caption=hook_text,
+                    parse_mode=ParseMode.MARKDOWN,
+                    reply_markup=markup)
+            sent = True
+            logger.info("HOOK sent as photo from file")
+        except TelegramError as e:
+            logger.warning(f"Photo from file failed: {e}")
+
+    # Если файл не найден — пробуем по URL
+    if not sent:
+        try:
+            await context.bot.send_photo(
+                chat_id=chat_id,
+                photo=HOOK_IMAGE_URL,
+                caption=hook_text,
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=markup)
+            sent = True
+            logger.info("HOOK sent as photo from URL")
+        except TelegramError as e:
+            logger.warning(f"Photo from URL failed: {e}")
+
+    # Fallback: если картинка недоступна — просто текст
+    if not sent:
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=hook_text,
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=markup)
+        logger.info("HOOK sent as text (no image)")
 
 
 # ════════════════════════════════════════════════════════════════════════════
