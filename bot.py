@@ -275,7 +275,7 @@ async def lang_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
 
 async def interest_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Интерес выбран → AI opener → WARM1, ждём реакции."""
+    """Интерес выбран → GEO квиз."""
     query    = update.callback_query
     await query.answer()
 
@@ -283,11 +283,35 @@ async def interest_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     user_id  = query.from_user.id
     user     = get_user(user_id)
     lang     = user.get("lang", "en")
+
+    update_user(user_id, interest=interest, state=State.GEO_QUIZ)
+
+    # Гео-кнопки зависят от интереса
+    geo_text, geo_buttons = M.geo_quiz(lang, interest)
+    keyboard = [[InlineKeyboardButton(lbl, callback_data=cb)] for lbl, cb in geo_buttons]
+
+    await query.edit_message_text(
+        text=geo_text,
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=InlineKeyboardMarkup(keyboard),
+    )
+
+
+async def geo_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Гео выбрано → AI opener → WARM1."""
+    query   = update.callback_query
+    await query.answer()
+
+    geo     = query.data[len("geo_"):]
+    user_id = query.from_user.id
+    user    = get_user(user_id)
+    lang     = user.get("lang", "en")
+    interest = user.get("interest", "betting")
     chat_id  = query.message.chat_id
 
     update_user(
         user_id,
-        interest=interest,
+        geo=geo,
         state=State.WARM1,
         funnel_stage="warming",
         stage_replies=0,
@@ -302,7 +326,7 @@ async def interest_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     await asyncio.sleep(1.0)
     await context.bot.send_chat_action(chat_id, "typing")
 
-    opener = await generate_warm_opener(lang=lang, interest=interest)
+    opener = await generate_warm_opener(lang=lang, interest=interest, geo=geo)
     add_ai_message(user_id, "assistant", opener)
 
     await asyncio.sleep(_typing_delay(opener) * 0.6)
@@ -361,6 +385,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     if state in (State.WARM1, State.WARM2):
         await _handle_warming(update, context, user_id, lang, interest, user_text)
+    elif state == State.GEO_QUIZ:
+        # Юзер написал текст вместо кнопки — просто ждём кнопку, игнорируем
+        pass
     elif state == State.TEASE:
         await _handle_tease(update, context, user_id, lang, interest, user_text)
     elif state == State.CTA:
@@ -830,6 +857,7 @@ def main() -> None:
 
     app.add_handler(CallbackQueryHandler(lang_chosen,     pattern=r"^lang_"))
     app.add_handler(CallbackQueryHandler(interest_chosen, pattern=r"^int_"))
+    app.add_handler(CallbackQueryHandler(geo_chosen,      pattern=r"^geo_"))
     app.add_handler(CallbackQueryHandler(user_joined,     pattern=r"^user_joined$"))
 
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
@@ -837,7 +865,7 @@ def main() -> None:
     app.job_queue.run_repeating(reengage_job,        interval=30 * 60, first=60)
     app.job_queue.run_repeating(subscribed_push_job, interval=60 * 60, first=120)
 
-    logger.info("OddsVault Bot v6.0 started 🚀  Valeria is online.")
+    logger.info("OddsVault Bot v7.0 started 🚀  Valeria is online.")
     app.run_polling(drop_pending_updates=True)
 
 
