@@ -96,7 +96,7 @@ async def _send_cta(bot, user_id, chat_id, lang, interest, geo):
 # ════════════════════════════════════════════════════════════════════════════
 #  /start — HOOK с картинкой + кнопки языков → QUIZ (интерес)
 #
-#  Картинка: положи файл valeria_hook.png в корень проекта рядом с bot.py
+#  Картинка: файл 1name.png лежит в корне репо рядом с bot.py
 #  Или используй HOOK_IMAGE_URL (прямая ссылка на картинку).
 #
 #  Поток: send_photo(caption=HOOK, кнопки языков) → пользователь выбирает
@@ -104,7 +104,7 @@ async def _send_cta(bot, user_id, chat_id, lang, interest, geo):
 # ════════════════════════════════════════════════════════════════════════════
 
 # Путь к картинке (лежит рядом с bot.py в репо)
-HOOK_IMAGE_PATH = os.path.join(os.path.dirname(__file__), "valeria_hook.png")
+HOOK_IMAGE_PATH = os.path.join(os.path.dirname(__file__), "1name.png")
 
 # Fallback: прямой URL если файл не найден (замени на свой хостинг)
 HOOK_IMAGE_URL  = "https://raw.githubusercontent.com/stanislavgggg/tgmainbot/4891019e49ee730aad0db5bcd065708a1b44c471/1name.png"
