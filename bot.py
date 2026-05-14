@@ -51,6 +51,7 @@ from storage import (
     get_ai_history,
     get_user,
     update_user,
+    mark_push_sent,           # FIX: отдельная метка времени пуша
     # FIX: импортируем все новые функции v2
     classify_objection,
     log_objection,
@@ -649,7 +650,18 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 # ════════════════════════════════════════════════════════════════════════════
 
 async def subscribed_push_job(context: ContextTypes.DEFAULT_TYPE) -> None:
-    """AI генерирует новый hook через реальный поиск — не шаблонный текст."""
+    """AI генерирует новый hook через реальный поиск — не шаблонный текст.
+
+    Логика молчания строится на двух независимых метках:
+      • last_active  — обновляется каждый раз, когда юзер САМ пишет боту.
+      • last_push_at — обновляется только после того, как МЫ отправили пуш.
+
+    Пуш отправляется только если:
+      1. Юзер молчит ≥ 6 часов (last_active).
+      2. С момента последнего нашего пуша тоже прошло ≥ 6 часов (last_push_at).
+    Это предотвращает спам: если юзер активен, update_user() двигает
+    last_active, поэтому условие 1 не выполняется, пока он общается.
+    """
     now = datetime.now(timezone.utc).timestamp()
     SIX_HOURS = 6 * 3600
 
@@ -659,17 +671,30 @@ async def subscribed_push_job(context: ContextTypes.DEFAULT_TYPE) -> None:
         if funnel_stage != "subscribed":
             continue
 
+        # ── 1. Юзер сам молчит ≥ 6 ч (last_active) ─────────────────────────
         last_active_str = user.get("last_active")
         if not last_active_str:
             continue
         try:
-            last_ts = datetime.fromisoformat(last_active_str)
-            if last_ts.tzinfo is None:
-                last_ts = last_ts.replace(tzinfo=timezone.utc)
-            if now - last_ts.timestamp() < SIX_HOURS:
-                continue
+            last_active_ts = datetime.fromisoformat(last_active_str)
+            if last_active_ts.tzinfo is None:
+                last_active_ts = last_active_ts.replace(tzinfo=timezone.utc)
+            if now - last_active_ts.timestamp() < SIX_HOURS:
+                continue  # юзер недавно сам писал — не трогаем
         except Exception:
             continue
+
+        # ── 2. Последний наш пуш был ≥ 6 ч назад (last_push_at) ─────────────
+        last_push_str = user.get("last_push_at")
+        if last_push_str:
+            try:
+                last_push_ts = datetime.fromisoformat(last_push_str)
+                if last_push_ts.tzinfo is None:
+                    last_push_ts = last_push_ts.replace(tzinfo=timezone.utc)
+                if now - last_push_ts.timestamp() < SIX_HOURS:
+                    continue  # пуш уже был недавно — ждём
+            except Exception:
+                pass
 
         lang            = user.get("lang", "en")
         interest        = user.get("interest", "betting")
@@ -702,7 +727,7 @@ async def subscribed_push_job(context: ContextTypes.DEFAULT_TYPE) -> None:
                 chat_id=user_id, text=response, parse_mode=ParseMode.MARKDOWN,
             )
             add_ai_message(user_id, "assistant", response)
-            update_user(user_id)  # обновить last_active чтобы не спамить
+            mark_push_sent(user_id)  # FIX: пишем только last_push_at, не трогаем last_active
             logger.info(f"Proactive push → {user_id}")
         except TelegramError as e:
             logger.warning(f"Proactive push failed [{user_id}]: {e}")
