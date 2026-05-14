@@ -14,7 +14,7 @@ from config import ANTHROPIC_KEY, AI_MAX_TOKENS
 logger = logging.getLogger(__name__)
 
 ANTHROPIC_URL     = "https://api.anthropic.com/v1/messages"
-MODEL             = "claude-haiku-4-5-20251001"
+MODEL             = "claude-haiku-4-5"
 SEARCH_MAX_TOKENS = max(AI_MAX_TOKENS, 1500)
 
 WEB_SEARCH_TOOL = {
@@ -170,7 +170,6 @@ def _system_prompt(
     objections      = objections or {}
     used_techniques = used_techniques or []
 
-    # Досье на юзера
     _obj_desc = {
         "scam":           "говорил «скам/развод/обман»",
         "no_money":       "говорил «нет денег»",
@@ -194,7 +193,6 @@ def _system_prompt(
     psychotype_block   = _PSYCHOTYPE_PLAYBOOK.get(psychotype, _PSYCHOTYPE_PLAYBOOK["neutral"])
     close_text, _      = _get_close_technique(stage_replies)
 
-    # Funnel stage
     if funnel_stage == "warming":
         if stage_replies == 0:
             next_rule = "Do NOT add [NEXT:tease] yet."
@@ -470,7 +468,6 @@ async def ask_valeria(
         technique_used = m3.group(1)
         raw = re.sub(r"\[TECHNIQUE:\w+\]", "", raw).strip()
 
-    # Если модель не проставила — берём из расписания
     if not technique_used:
         _, technique_used = _get_close_technique(stage_replies)
 
