@@ -645,7 +645,73 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 
 # ════════════════════════════════════════════════════════════════════════════
-#  RE-ENGAGE JOB (каждые 30 мин)
+#  PROACTIVE PUSH — подписанные юзеры (каждые 6 часов молчания)
+# ════════════════════════════════════════════════════════════════════════════
+
+async def subscribed_push_job(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """AI генерирует новый hook через реальный поиск — не шаблонный текст."""
+    now = datetime.now(timezone.utc).timestamp()
+    SIX_HOURS = 6 * 3600
+
+    for user in get_all_users():
+        user_id      = user.get("id")
+        funnel_stage = user.get("funnel_stage", "new")
+        if funnel_stage != "subscribed":
+            continue
+
+        last_active_str = user.get("last_active")
+        if not last_active_str:
+            continue
+        try:
+            last_ts = datetime.fromisoformat(last_active_str)
+            if last_ts.tzinfo is None:
+                last_ts = last_ts.replace(tzinfo=timezone.utc)
+            if now - last_ts.timestamp() < SIX_HOURS:
+                continue
+        except Exception:
+            continue
+
+        lang            = user.get("lang", "en")
+        interest        = user.get("interest", "betting")
+        history         = get_ai_history(user_id)
+        psychotype      = get_psychotype(user_id)
+        objections      = get_objections(user_id)
+        used_techniques = get_used_techniques(user_id)
+
+        try:
+            response, _, _, technique_used = await ask_valeria(
+                user_message=(
+                    "[PROACTIVE_PUSH] Generate a new hook to re-engage this user. "
+                    "Search for something real and urgent happening NOW. "
+                    "Do not reference previous conversation — fresh fact, fresh angle."
+                ),
+                history=history,
+                lang=lang,
+                interest=interest,
+                funnel_stage="subscribed",
+                psychotype=psychotype,
+                objections=objections,
+                used_techniques=used_techniques,
+            )
+            if technique_used:
+                log_technique(user_id, technique_used)
+
+            await context.bot.send_chat_action(chat_id=user_id, action="typing")
+            await asyncio.sleep(2.0)
+            await context.bot.send_message(
+                chat_id=user_id, text=response, parse_mode=ParseMode.MARKDOWN,
+            )
+            add_ai_message(user_id, "assistant", response)
+            update_user(user_id)  # обновить last_active чтобы не спамить
+            logger.info(f"Proactive push → {user_id}")
+        except TelegramError as e:
+            logger.warning(f"Proactive push failed [{user_id}]: {e}")
+        except Exception as e:
+            logger.error(f"Proactive push error [{user_id}]: {e}")
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  RE-ENGAGE JOB — неподписавшиеся (каждые 30 мин)
 # ════════════════════════════════════════════════════════════════════════════
 
 async def reengage_job(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -658,7 +724,7 @@ async def reengage_job(context: ContextTypes.DEFAULT_TYPE) -> None:
         lang         = user.get("lang", "en")
         interest     = user.get("interest", "betting")
 
-        if funnel_stage in ("subscribed", "new"):
+        if funnel_stage == "new":
             continue
         if funnel_stage not in ("cta", "tease", "warming"):
             continue
@@ -743,9 +809,10 @@ def main() -> None:
 
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    app.job_queue.run_repeating(reengage_job, interval=30 * 60, first=60)
+    app.job_queue.run_repeating(reengage_job,        interval=30 * 60, first=60)
+    app.job_queue.run_repeating(subscribed_push_job, interval=60 * 60, first=120)
 
-    logger.info("OddsVault Bot v5.0 started 🚀  Valeria is online.")
+    logger.info("OddsVault Bot v6.0 started 🚀  Valeria is online.")
     app.run_polling(drop_pending_updates=True)
 
 
