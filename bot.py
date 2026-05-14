@@ -1,15 +1,13 @@
 """
-bot.py — OddsVault Bot  v4.0  (funnel-fix)
+bot.py — OddsVault Bot  v5.0  (full-fix)
 ════════════════════════════════════════════
-ИСПРАВЛЕНИЯ vs v3:
-  1. warming→tease: теперь TEASE сообщение отправляется сразу,
-     не просто меняется state в БД.
-  2. tease→cta: CTA теперь всегда отправляется после AI-ответа,
-     не только если `next_stage == "cta"` вернулся из API.
-  3. Убрано двойное сообщение при auto-lang detection (WAKE_UP → сразу QUIZ).
-  4. generate_warm_opener теперь всегда одно сообщение, без эха.
-  5. После stage_replies overflow: transition гарантирован даже без AI.
-  6. /start сбрасывает флаги если пользователь возвращается.
+ИСПРАВЛЕНИЯ vs v4:
+  1. ask_valeria() распаковывается в 4 значения везде (было 3 → ValueError).
+  2. classify_objection + log_objection вызываются перед каждым ask_valeria().
+  3. update_psychotype вызывается после каждого сообщения.
+  4. log_technique вызывается с technique_used из ask_valeria().
+  5. psychotype, objections, used_techniques передаются в ask_valeria().
+  6. Все новые функции storage импортированы.
 """
 
 import asyncio
@@ -53,6 +51,14 @@ from storage import (
     get_ai_history,
     get_user,
     update_user,
+    # FIX: импортируем все новые функции v2
+    classify_objection,
+    log_objection,
+    get_objections,
+    update_psychotype,
+    get_psychotype,
+    get_used_techniques,
+    log_technique,
 )
 from ai_agent import ask_valeria, detect_tone, generate_warm_opener
 import messages as M
@@ -100,7 +106,6 @@ def _detect_lang(tg_lang_code: str | None) -> str | None:
 # ════════════════════════════════════════════════════════════════════════════
 
 def _typing_delay(text: str) -> float:
-    """Реалистичная задержка печати: ~1.5–3.5 сек в зависимости от длины."""
     return round(1.5 + min(len(text) / 120, 2.0), 1)
 
 
@@ -132,16 +137,31 @@ def _cta_keyboard(lang: str, interest: str) -> InlineKeyboardMarkup:
 
 
 # ════════════════════════════════════════════════════════════════════════════
+#  ВСПОМОГАТЕЛЬНАЯ ФУНКЦИЯ: подготовить контекст для ask_valeria
+# ════════════════════════════════════════════════════════════════════════════
+
+def _prepare_valeria_context(user_id: int, user_text: str) -> tuple[str, dict[str, int], list[str]]:
+    """
+    FIX: классифицирует возражение, обновляет психотип, возвращает
+    (psychotype, objections, used_techniques) для передачи в ask_valeria().
+    """
+    obj_type = classify_objection(user_text)
+    if obj_type:
+        log_objection(user_id, obj_type)
+
+    psychotype      = update_psychotype(user_id, user_text)
+    objections      = get_objections(user_id)
+    used_techniques = get_used_techniques(user_id)
+    return psychotype, objections, used_techniques
+
+
+# ════════════════════════════════════════════════════════════════════════════
 #  ВНУТРЕННИЕ ОТПРАВЩИКИ ЭТАПОВ
 # ════════════════════════════════════════════════════════════════════════════
 
 async def _send_tease(
     bot, user_id: int, chat_id: int, lang: str, interest: str
 ) -> None:
-    """
-    FIX #1: отправляет TEASE-сообщение И переводит state.
-    В v3 state менялся, но сообщение не отправлялось.
-    """
     update_user(user_id, state=State.TEASE, funnel_stage="tease", stage_replies=0)
 
     tease_text = M.get(M.TEASE, lang, interest)
@@ -158,7 +178,6 @@ async def _send_tease(
 async def _send_cta(
     bot, user_id: int, chat_id: int, lang: str, interest: str
 ) -> None:
-    """Отправляет CTA-кнопку и переводит state → CTA."""
     update_user(user_id, state=State.CTA, funnel_stage="cta")
     cta_text = M.CTA_TEXT.get(lang, M.CTA_TEXT.get("en", "🔐 The vault is right there."))
     await bot.send_message(
@@ -196,7 +215,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     auto_lang = _detect_lang(tg_lang)
 
     if auto_lang:
-        # FIX #3: авто-lang → ОДНО сообщение WAKE_UP + сразу QUIZ в нём же
         update_user(user_id, lang=auto_lang, state=State.QUIZ)
 
         wake_text = M.WAKE_UP.get(auto_lang, M.WAKE_UP.get("en", ""))
@@ -207,21 +225,18 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await context.bot.send_chat_action(chat_id, "typing")
         await asyncio.sleep(1.2)
 
-        # WAKE_UP
         await update.message.reply_text(wake_text, parse_mode=ParseMode.MARKDOWN)
 
         await asyncio.sleep(1.0)
         await context.bot.send_chat_action(chat_id, "typing")
         await asyncio.sleep(1.0)
 
-        # QUIZ сразу за ним
         await update.message.reply_text(
             quiz_text,
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=InlineKeyboardMarkup(keyboard),
         )
     else:
-        # Не определили язык → HOOK + выбор языка
         hook_text = M.HOOK.get("en", "Hey. I'm Valeria.")
         keyboard  = [[InlineKeyboardButton(lbl, callback_data=cb)]
                      for lbl, cb in M.LANG_BUTTONS]
@@ -278,7 +293,6 @@ async def interest_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         ai_msg_count=0,
     )
 
-    # Короткое подтверждение — меняем сообщение с кнопками
     await query.edit_message_text(
         text=M.QUIZ_ACK.get(lang, "Got it. Give me a moment... ⏳"),
         parse_mode=ParseMode.MARKDOWN,
@@ -287,7 +301,6 @@ async def interest_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     await asyncio.sleep(1.0)
     await context.bot.send_chat_action(chat_id, "typing")
 
-    # AI генерирует открывающий хук с реальными данными
     opener = await generate_warm_opener(lang=lang, interest=interest)
     add_ai_message(user_id, "assistant", opener)
 
@@ -364,38 +377,42 @@ async def _handle_warming(
     context: ContextTypes.DEFAULT_TYPE,
     user_id: int, lang: str, interest: str, user_text: str,
 ) -> None:
-    """
-    FIX #1 + #2 + #5:
-    - replies счётчик инкрементируется ПОСЛЕ чтения
-    - переход warming→tease отправляет реальное tease сообщение
-    - forced_next гарантирует переход даже без AI-ключа
-    """
     chat_id = update.effective_chat.id
     history = get_ai_history(user_id)
     replies = get_user(user_id).get("stage_replies", 0) + 1
     update_user(user_id, stage_replies=replies)
 
-    # Определяем нужен ли форсированный переход
     forced_next: str | None = None
     if replies >= 3:
         forced_next = "tease"
 
+    # FIX: классифицируем возражение, обновляем психотип
+    psychotype, objections, used_techniques = _prepare_valeria_context(user_id, user_text)
+
     await context.bot.send_chat_action(chat_id, "typing")
 
-    response, refined, ai_next = await ask_valeria(
+    # FIX: распаковываем 4 значения + передаём psychotype/objections/used_techniques
+    response, refined, ai_next, technique_used = await ask_valeria(
         user_message=user_text,
         history=history,
         lang=lang,
         interest=interest,
         funnel_stage="warming",
         stage_replies=replies,
+        psychotype=psychotype,
+        objections=objections,
+        used_techniques=used_techniques,
     )
 
-    # forced_next побеждает над AI если превысили лимит
+    # FIX: логируем использованную технику
+    if technique_used:
+        log_technique(user_id, technique_used)
+
     next_stage = forced_next if forced_next else ai_next
 
     add_ai_message(user_id, "user", user_text)
     add_ai_message(user_id, "assistant", response)
+    add_tone(user_id, detect_tone(user_text, history))
 
     if refined != interest:
         update_user(user_id, interest=refined)
@@ -404,11 +421,9 @@ async def _handle_warming(
     await asyncio.sleep(_typing_delay(response) * 0.5)
     await update.message.reply_text(response, parse_mode=ParseMode.MARKDOWN)
 
-    # FIX #1: переход → TEASE с реальным сообщением
     if next_stage == "tease":
         await asyncio.sleep(2.5)
         await _send_tease(context.bot, user_id, chat_id, lang, interest)
-
     elif next_stage == "cta":
         await asyncio.sleep(2.5)
         await context.bot.send_chat_action(chat_id, "typing")
@@ -425,9 +440,6 @@ async def _handle_tease(
     context: ContextTypes.DEFAULT_TYPE,
     user_id: int, lang: str, interest: str, user_text: str,
 ) -> None:
-    """
-    FIX #2: после 2 реплик в tease — CTA гарантируется.
-    """
     chat_id = update.effective_chat.id
     history = get_ai_history(user_id)
     replies = get_user(user_id).get("stage_replies", 0) + 1
@@ -435,21 +447,33 @@ async def _handle_tease(
 
     forced_cta = replies >= 2
 
+    # FIX: классифицируем возражение, обновляем психотип
+    psychotype, objections, used_techniques = _prepare_valeria_context(user_id, user_text)
+
     await context.bot.send_chat_action(chat_id, "typing")
 
-    response, refined, ai_next = await ask_valeria(
+    # FIX: распаковываем 4 значения + передаём контекст
+    response, refined, ai_next, technique_used = await ask_valeria(
         user_message=user_text,
         history=history,
         lang=lang,
         interest=interest,
         funnel_stage="tease",
         stage_replies=replies,
+        psychotype=psychotype,
+        objections=objections,
+        used_techniques=used_techniques,
     )
+
+    # FIX: логируем технику
+    if technique_used:
+        log_technique(user_id, technique_used)
 
     next_stage = "cta" if forced_cta else ai_next
 
     add_ai_message(user_id, "user", user_text)
     add_ai_message(user_id, "assistant", response)
+    add_tone(user_id, detect_tone(user_text, history))
 
     if refined != interest:
         update_user(user_id, interest=refined)
@@ -458,7 +482,6 @@ async def _handle_tease(
     await asyncio.sleep(_typing_delay(response) * 0.5)
     await update.message.reply_text(response, parse_mode=ParseMode.MARKDOWN)
 
-    # FIX #2: всегда идём в CTA после tease
     if next_stage == "cta":
         await asyncio.sleep(2.5)
         await context.bot.send_chat_action(chat_id, "typing")
@@ -479,18 +502,30 @@ async def _handle_cta(
     chat_id = update.effective_chat.id
     history = get_ai_history(user_id)
 
+    # FIX: классифицируем возражение, обновляем психотип
+    psychotype, objections, used_techniques = _prepare_valeria_context(user_id, user_text)
+
     await context.bot.send_chat_action(chat_id, "typing")
 
-    response, _, _ = await ask_valeria(
+    # FIX: распаковываем 4 значения (было 3 → ValueError)
+    response, _, ai_next, technique_used = await ask_valeria(
         user_message=user_text,
         history=history,
         lang=lang,
         interest=interest,
         funnel_stage="cta",
+        psychotype=psychotype,
+        objections=objections,
+        used_techniques=used_techniques,
     )
+
+    # FIX: логируем технику
+    if technique_used:
+        log_technique(user_id, technique_used)
 
     add_ai_message(user_id, "user", user_text)
     add_ai_message(user_id, "assistant", response)
+    add_tone(user_id, detect_tone(user_text, history))
 
     await asyncio.sleep(_typing_delay(response) * 0.5)
     await update.message.reply_text(response, parse_mode=ParseMode.MARKDOWN)
@@ -517,16 +552,27 @@ async def _handle_ai_chat(
     history      = get_ai_history(user_id)
     msg_count    = user.get("ai_msg_count", 0)
 
+    # FIX: классифицируем возражение, обновляем психотип
+    psychotype, objections, used_techniques = _prepare_valeria_context(user_id, user_text)
+
     add_ai_message(user_id, "user", user_text)
     await context.bot.send_chat_action(chat_id, "typing")
 
-    response, refined, _ = await ask_valeria(
+    # FIX: распаковываем 4 значения (было 3 → ValueError)
+    response, refined, _, technique_used = await ask_valeria(
         user_message=user_text,
         history=history,
         lang=lang,
         interest=interest,
         funnel_stage=funnel_stage,
+        psychotype=psychotype,
+        objections=objections,
+        used_techniques=used_techniques,
     )
+
+    # FIX: логируем технику
+    if technique_used:
+        log_technique(user_id, technique_used)
 
     new_count = msg_count + 1
     update_kwargs: dict = {"ai_msg_count": new_count}
@@ -629,8 +675,8 @@ async def reengage_job(context: ContextTypes.DEFAULT_TYPE) -> None:
         except Exception:
             continue
 
-        ch           = CHANNELS.get(lang, CHANNELS["en"]).get(interest, CHANNELS["en"]["betting"])
-        keyboard     = InlineKeyboardMarkup([
+        ch       = CHANNELS.get(lang, CHANNELS["en"]).get(interest, CHANNELS["en"]["betting"])
+        keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton(M.CTA.get(lang, "📲 OddsVault"), url=ch["url"])],
             [InlineKeyboardButton(M.CTA_BUTTON_JOINED.get(lang, "✅"), callback_data="user_joined")],
         ])
@@ -699,7 +745,7 @@ def main() -> None:
 
     app.job_queue.run_repeating(reengage_job, interval=30 * 60, first=60)
 
-    logger.info("OddsVault Bot v4.0 started 🚀  Valeria is online.")
+    logger.info("OddsVault Bot v5.0 started 🚀  Valeria is online.")
     app.run_polling(drop_pending_updates=True)
 
 
