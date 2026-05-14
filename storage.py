@@ -91,6 +91,17 @@ def update_user(user_id: int, **kwargs) -> None:
         _save()
 
 
+def mark_push_sent(user_id: int) -> None:
+    """Записывает время последнего проактивного пуша.
+    Намеренно НЕ трогает last_active — чтобы не сбивать логику
+    «юзер сам написал vs мы написали ему».
+    """
+    with _lock:
+        user = _users.setdefault(user_id, {"id": user_id})
+        user["last_push_at"] = datetime.now(timezone.utc).isoformat()
+        _save()
+
+
 def get_all_users() -> list[dict]:
     with _lock:
         return [dict(u) for u in _users.values()]
