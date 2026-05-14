@@ -1,16 +1,4 @@
-"""
-bot.py — OddsVault Bot  v5.0  (full-fix)
-════════════════════════════════════════════
-ИСПРАВЛЕНИЯ vs v4:
-  1. ask_valeria() распаковывается в 4 значения везде (было 3 → ValueError).
-  2. classify_objection + log_objection вызываются перед каждым ask_valeria().
-  3. update_psychotype вызывается после каждого сообщения.
-  4. log_technique вызывается с technique_used из ask_valeria().
-  5. psychotype, objections, used_techniques передаются в ask_valeria().
-  6. Все новые функции storage импортированы.
-"""
-
-import asyncio
+mport asyncio
 import logging
 import os
 import random
@@ -51,8 +39,6 @@ from storage import (
     get_ai_history,
     get_user,
     update_user,
-    mark_push_sent,           # FIX: отдельная метка времени пуша
-    # FIX: импортируем все новые функции v2
     classify_objection,
     log_objection,
     get_objections,
@@ -102,6 +88,15 @@ def _detect_lang(tg_lang_code: str | None) -> str | None:
     return _TG_LANG_MAP.get(tg_lang_code.split("-")[0].lower())
 
 
+# ── mark_push_sent (если нет в storage) ─────────────────────────────────────
+def mark_push_sent(user_id: int) -> None:
+    """Обновляет только last_push_at — не трогает last_active."""
+    update_user(
+        user_id,
+        last_push_at=datetime.now(timezone.utc).isoformat(),
+    )
+
+
 # ════════════════════════════════════════════════════════════════════════════
 #  UTILS
 # ════════════════════════════════════════════════════════════════════════════
@@ -110,7 +105,12 @@ def _typing_delay(text: str) -> float:
     return round(1.5 + min(len(text) / 120, 2.0), 1)
 
 
-async def _send_image(context, chat_id: int, interest: str, caption: str = "") -> bool:
+async def _send_image(
+    context: ContextTypes.DEFAULT_TYPE,
+    chat_id: int,
+    interest: str,
+    caption: str = "",
+) -> bool:
     images = INTEREST_IMAGES.get(interest) or INTEREST_IMAGES.get("betting", [])
     if not images:
         return False
@@ -131,21 +131,48 @@ async def _send_image(context, chat_id: int, interest: str, caption: str = "") -
 def _cta_keyboard(lang: str, interest: str) -> InlineKeyboardMarkup:
     ch = CHANNELS.get(lang, CHANNELS["en"]).get(interest, CHANNELS["en"]["betting"])
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton(M.CTA.get(lang, "📲 OddsVault"), url=ch["url"])],
-        [InlineKeyboardButton(M.CTA_BUTTON_JOINED.get(lang, "✅ Already in"),
-                              callback_data="user_joined")],
+        [InlineKeyboardButton(
+            M.CTA.get(lang, "📲 OddsVault"),
+            url=ch["url"],
+        )],
+        [InlineKeyboardButton(
+            M.CTA_BUTTON_JOINED.get(lang, "✅ Already in"),
+            callback_data="user_joined",
+        )],
     ])
+
+
+def _geo_keyboard(lang: str) -> tuple[str, InlineKeyboardMarkup]:
+    """
+    FIX: заменяет несуществующую M.geo_quiz().
+    Простой выбор региона — универсальный для всех интересов.
+    """
+    prompts = {
+        "en": "Where are you based? This helps me find the most relevant offers for you.",
+        "es": "¿Dónde estás? Esto me ayuda a encontrar las ofertas más relevantes para ti.",
+        "hr": "Gdje si? To mi pomaže pronaći najrelevantnije ponude za tebe.",
+        "lt": "Kur esi? Tai padeda man rasti aktualiausius pasiūlymus tau.",
+        "lv": "Kur tu esi? Tas man palīdz atrast piemērotākos piedāvājumus.",
+    }
+    buttons = [
+        [InlineKeyboardButton("🇪🇸 España",   callback_data="geo_ES")],
+        [InlineKeyboardButton("🇭🇷 Hrvatska", callback_data="geo_HR")],
+        [InlineKeyboardButton("🇱🇹 Lietuva",  callback_data="geo_LT")],
+        [InlineKeyboardButton("🇱🇻 Latvija",  callback_data="geo_LV")],
+        [InlineKeyboardButton("🌍 Other / EU", callback_data="geo_EU")],
+    ]
+    text = prompts.get(lang, prompts["en"])
+    return text, InlineKeyboardMarkup(buttons)
 
 
 # ════════════════════════════════════════════════════════════════════════════
 #  ВСПОМОГАТЕЛЬНАЯ ФУНКЦИЯ: подготовить контекст для ask_valeria
 # ════════════════════════════════════════════════════════════════════════════
 
-def _prepare_valeria_context(user_id: int, user_text: str) -> tuple[str, dict[str, int], list[str]]:
-    """
-    FIX: классифицирует возражение, обновляет психотип, возвращает
-    (psychotype, objections, used_techniques) для передачи в ask_valeria().
-    """
+def _prepare_valeria_context(
+    user_id: int,
+    user_text: str,
+) -> tuple[str, dict[str, int], list[str]]:
     obj_type = classify_objection(user_text)
     if obj_type:
         log_objection(user_id, obj_type)
@@ -161,10 +188,9 @@ def _prepare_valeria_context(user_id: int, user_text: str) -> tuple[str, dict[st
 # ════════════════════════════════════════════════════════════════════════════
 
 async def _send_tease(
-    bot, user_id: int, chat_id: int, lang: str, interest: str
+    bot, user_id: int, chat_id: int, lang: str, interest: str,
 ) -> None:
     update_user(user_id, state=State.TEASE, funnel_stage="tease", stage_replies=0)
-
     tease_text = M.get(M.TEASE, lang, interest)
     await bot.send_chat_action(chat_id, "typing")
     await asyncio.sleep(_typing_delay(tease_text) * 0.7)
@@ -177,7 +203,7 @@ async def _send_tease(
 
 
 async def _send_cta(
-    bot, user_id: int, chat_id: int, lang: str, interest: str
+    bot, user_id: int, chat_id: int, lang: str, interest: str,
 ) -> None:
     update_user(user_id, state=State.CTA, funnel_stage="cta")
     cta_text = M.CTA_TEXT.get(lang, M.CTA_TEXT.get("en", "🔐 The vault is right there."))
@@ -203,7 +229,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     update_user(
         user_id,
-        state=State.LANG,
+        state=State.QUIZ,
         funnel_stage="new",
         first_name=first_name,
         username=username,
@@ -216,7 +242,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     auto_lang = _detect_lang(tg_lang)
 
     if auto_lang:
-update_user(user_id, interest=interest, state=State.WARM1)
+        # Язык определён автоматически — сохраняем и сразу показываем квиз
+        update_user(user_id, lang=auto_lang, state=State.QUIZ)
+
         wake_text = M.WAKE_UP.get(auto_lang, M.WAKE_UP.get("en", ""))
         quiz_text = M.QUIZ.get(auto_lang, M.QUIZ.get("en", "What interests you most?"))
         buttons   = M.QUIZ_BUTTONS.get(auto_lang, M.QUIZ_BUTTONS.get("en", []))
@@ -224,19 +252,19 @@ update_user(user_id, interest=interest, state=State.WARM1)
 
         await context.bot.send_chat_action(chat_id, "typing")
         await asyncio.sleep(1.2)
-
         await update.message.reply_text(wake_text, parse_mode=ParseMode.MARKDOWN)
 
         await asyncio.sleep(1.0)
         await context.bot.send_chat_action(chat_id, "typing")
         await asyncio.sleep(1.0)
-
         await update.message.reply_text(
             quiz_text,
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=InlineKeyboardMarkup(keyboard),
         )
     else:
+        # Язык неизвестен — показываем выбор языка
+        update_user(user_id, state=State.LANG)
         hook_text = M.HOOK.get("en", "Hey. I'm Valeria.")
         keyboard  = [[InlineKeyboardButton(lbl, callback_data=cb)]
                      for lbl, cb in M.LANG_BUTTONS]
@@ -251,7 +279,7 @@ update_user(user_id, interest=interest, state=State.WARM1)
 
 
 # ════════════════════════════════════════════════════════════════════════════
-#  LANG / QUIZ callback handlers
+#  LANG / QUIZ / GEO callback handlers
 # ════════════════════════════════════════════════════════════════════════════
 
 async def lang_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -275,7 +303,7 @@ async def lang_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
 async def interest_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Интерес выбран → GEO квиз."""
-    query    = update.callback_query
+    query   = update.callback_query
     await query.answer()
 
     interest = query.data[len("int_"):]
@@ -283,16 +311,16 @@ async def interest_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     user     = get_user(user_id)
     lang     = user.get("lang", "en")
 
-    update_user(user_id, interest=interest, state=State.GEO_QUIZ)
+    # FIX: State.GEO_QUIZ → State.WARM1 (GEO_QUIZ убран, гео собирается здесь)
+    update_user(user_id, interest=interest, state=State.WARM1)
 
-    # Гео-кнопки зависят от интереса
-    geo_text, geo_buttons = M.geo_quiz(lang, interest)
-    keyboard = [[InlineKeyboardButton(lbl, callback_data=cb)] for lbl, cb in geo_buttons]
+    # FIX: _geo_keyboard вместо несуществующей M.geo_quiz()
+    geo_text, geo_markup = _geo_keyboard(lang)
 
     await query.edit_message_text(
         text=geo_text,
         parse_mode=ParseMode.MARKDOWN,
-        reply_markup=InlineKeyboardMarkup(keyboard),
+        reply_markup=geo_markup,
     )
 
 
@@ -301,9 +329,9 @@ async def geo_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     query   = update.callback_query
     await query.answer()
 
-    geo     = query.data[len("geo_"):]
-    user_id = query.from_user.id
-    user    = get_user(user_id)
+    geo      = query.data[len("geo_"):]
+    user_id  = query.from_user.id
+    user     = get_user(user_id)
     lang     = user.get("lang", "en")
     interest = user.get("interest", "betting")
     chat_id  = query.message.chat_id
@@ -347,7 +375,11 @@ async def user_joined(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     interest = user.get("interest", "betting")
     chat_id  = query.message.chat_id
 
-    update_user(user_id, state=State.SUBSCRIBED, funnel_stage="subscribed")
+    update_user(
+        user_id,
+        state=State.AI_CHAT,
+        funnel_stage="subscribed",
+    )
 
     await context.bot.send_chat_action(chat_id, "typing")
     await asyncio.sleep(1.5)
@@ -359,14 +391,14 @@ async def user_joined(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         parse_mode=ParseMode.MARKDOWN,
     )
 
-    update_user(user_id, state=State.AI_CHAT)
-
 
 # ════════════════════════════════════════════════════════════════════════════
 #  ГЛАВНЫЙ MESSAGE HANDLER — FSM диспетчер
 # ════════════════════════════════════════════════════════════════════════════
 
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def handle_message(
+    update: Update, context: ContextTypes.DEFAULT_TYPE,
+) -> None:
     if not update.message or not update.message.text:
         return
 
@@ -384,15 +416,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     if state in (State.WARM1, State.WARM2):
         await _handle_warming(update, context, user_id, lang, interest, user_text)
-    elif state == State.GEO_QUIZ:
-        # Юзер написал текст вместо кнопки — просто ждём кнопку, игнорируем
-        pass
     elif state == State.TEASE:
         await _handle_tease(update, context, user_id, lang, interest, user_text)
     elif state == State.CTA:
         await _handle_cta(update, context, user_id, lang, interest, user_text)
     elif state in (State.AI_CHAT, State.SUBSCRIBED):
         await _handle_ai_chat(update, context, user_id, lang, interest, user_text, user)
+    # State.LANG, State.QUIZ, State.WARM1 без текста — ждём кнопку, игнорируем
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -402,23 +432,22 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 async def _handle_warming(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
-    user_id: int, lang: str, interest: str, user_text: str,
+    user_id: int,
+    lang: str,
+    interest: str,
+    user_text: str,
 ) -> None:
     chat_id = update.effective_chat.id
     history = get_ai_history(user_id)
     replies = get_user(user_id).get("stage_replies", 0) + 1
     update_user(user_id, stage_replies=replies)
 
-    forced_next: str | None = None
-    if replies >= 3:
-        forced_next = "tease"
+    forced_next = "tease" if replies >= 3 else None
 
-    # FIX: классифицируем возражение, обновляем психотип
     psychotype, objections, used_techniques = _prepare_valeria_context(user_id, user_text)
 
     await context.bot.send_chat_action(chat_id, "typing")
 
-    # FIX: распаковываем 4 значения + передаём psychotype/objections/used_techniques
     response, refined, ai_next, technique_used = await ask_valeria(
         user_message=user_text,
         history=history,
@@ -431,7 +460,6 @@ async def _handle_warming(
         used_techniques=used_techniques,
     )
 
-    # FIX: логируем использованную технику
     if technique_used:
         log_technique(user_id, technique_used)
 
@@ -465,7 +493,10 @@ async def _handle_warming(
 async def _handle_tease(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
-    user_id: int, lang: str, interest: str, user_text: str,
+    user_id: int,
+    lang: str,
+    interest: str,
+    user_text: str,
 ) -> None:
     chat_id = update.effective_chat.id
     history = get_ai_history(user_id)
@@ -474,12 +505,10 @@ async def _handle_tease(
 
     forced_cta = replies >= 2
 
-    # FIX: классифицируем возражение, обновляем психотип
     psychotype, objections, used_techniques = _prepare_valeria_context(user_id, user_text)
 
     await context.bot.send_chat_action(chat_id, "typing")
 
-    # FIX: распаковываем 4 значения + передаём контекст
     response, refined, ai_next, technique_used = await ask_valeria(
         user_message=user_text,
         history=history,
@@ -492,7 +521,6 @@ async def _handle_tease(
         used_techniques=used_techniques,
     )
 
-    # FIX: логируем технику
     if technique_used:
         log_technique(user_id, technique_used)
 
@@ -523,18 +551,18 @@ async def _handle_tease(
 async def _handle_cta(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
-    user_id: int, lang: str, interest: str, user_text: str,
+    user_id: int,
+    lang: str,
+    interest: str,
+    user_text: str,
 ) -> None:
-    """AI дожимает возражение + повторяет CTA кнопку."""
     chat_id = update.effective_chat.id
     history = get_ai_history(user_id)
 
-    # FIX: классифицируем возражение, обновляем психотип
     psychotype, objections, used_techniques = _prepare_valeria_context(user_id, user_text)
 
     await context.bot.send_chat_action(chat_id, "typing")
 
-    # FIX: распаковываем 4 значения (было 3 → ValueError)
     response, _, ai_next, technique_used = await ask_valeria(
         user_message=user_text,
         history=history,
@@ -546,7 +574,6 @@ async def _handle_cta(
         used_techniques=used_techniques,
     )
 
-    # FIX: логируем технику
     if technique_used:
         log_technique(user_id, technique_used)
 
@@ -557,7 +584,6 @@ async def _handle_cta(
     await asyncio.sleep(_typing_delay(response) * 0.5)
     await update.message.reply_text(response, parse_mode=ParseMode.MARKDOWN)
 
-    # Повторяем кнопку через паузу
     await asyncio.sleep(3.0)
     await context.bot.send_chat_action(chat_id, "typing")
     await asyncio.sleep(1.2)
@@ -565,27 +591,28 @@ async def _handle_cta(
 
 
 # ════════════════════════════════════════════════════════════════════════════
-#  AI_CHAT — свободный чат после подписки (FTD режим)
+#  AI_CHAT — свободный чат после подписки
 # ════════════════════════════════════════════════════════════════════════════
 
 async def _handle_ai_chat(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
-    user_id: int, lang: str, interest: str,
-    user_text: str, user: dict,
+    user_id: int,
+    lang: str,
+    interest: str,
+    user_text: str,
+    user: dict,
 ) -> None:
     chat_id      = update.effective_chat.id
     funnel_stage = user.get("funnel_stage", "subscribed")
     history      = get_ai_history(user_id)
     msg_count    = user.get("ai_msg_count", 0)
 
-    # FIX: классифицируем возражение, обновляем психотип
     psychotype, objections, used_techniques = _prepare_valeria_context(user_id, user_text)
 
     add_ai_message(user_id, "user", user_text)
     await context.bot.send_chat_action(chat_id, "typing")
 
-    # FIX: распаковываем 4 значения (было 3 → ValueError)
     response, refined, _, technique_used = await ask_valeria(
         user_message=user_text,
         history=history,
@@ -597,13 +624,13 @@ async def _handle_ai_chat(
         used_techniques=used_techniques,
     )
 
-    # FIX: логируем технику
     if technique_used:
         log_technique(user_id, technique_used)
 
-    new_count = msg_count + 1
-    update_kwargs: dict = {"ai_msg_count": new_count}
+    new_count     = msg_count + 1
+    update_kwargs = {"ai_msg_count": new_count}
 
+    # Сдвиг интереса
     if refined != interest:
         update_kwargs["interest"] = refined
         logger.info(f"User {user_id}: interest {interest} → {refined}")
@@ -627,7 +654,9 @@ async def _handle_ai_chat(
             await update.message.reply_text(response, parse_mode=ParseMode.MARKDOWN)
             await asyncio.sleep(1.5)
             await context.bot.send_message(
-                chat_id=chat_id, text=ftd_text, parse_mode=ParseMode.MARKDOWN,
+                chat_id=chat_id,
+                text=ftd_text,
+                parse_mode=ParseMode.MARKDOWN,
             )
             return
 
@@ -644,17 +673,19 @@ async def _handle_ai_chat(
 #  /stats
 # ════════════════════════════════════════════════════════════════════════════
 
-async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    users = get_all_users()
-    by_state: dict[str, int] = {}
-    by_lang:  dict[str, int] = {}
+async def stats_command(
+    update: Update, context: ContextTypes.DEFAULT_TYPE,
+) -> None:
+    users      = get_all_users()
+    by_state:  dict[str, int] = {}
+    by_lang:   dict[str, int] = {}
     subscribed = 0
 
     for u in users:
         s = u.get("state", "unknown")
         by_state[s] = by_state.get(s, 0) + 1
         l = u.get("lang", "?")
-        by_lang[l] = by_lang.get(l, 0) + 1
+        by_lang[l]  = by_lang.get(l, 0) + 1
         if u.get("funnel_stage") == "subscribed":
             subscribed += 1
 
@@ -672,23 +703,13 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 
 # ════════════════════════════════════════════════════════════════════════════
-#  PROACTIVE PUSH — подписанные юзеры (каждые 6 часов молчания)
+#  PROACTIVE PUSH
 # ════════════════════════════════════════════════════════════════════════════
 
-async def subscribed_push_job(context: ContextTypes.DEFAULT_TYPE) -> None:
-    """AI генерирует новый hook через реальный поиск — не шаблонный текст.
-
-    Логика молчания строится на двух независимых метках:
-      • last_active  — обновляется каждый раз, когда юзер САМ пишет боту.
-      • last_push_at — обновляется только после того, как МЫ отправили пуш.
-
-    Пуш отправляется только если:
-      1. Юзер молчит ≥ 6 часов (last_active).
-      2. С момента последнего нашего пуша тоже прошло ≥ 6 часов (last_push_at).
-    Это предотвращает спам: если юзер активен, update_user() двигает
-    last_active, поэтому условие 1 не выполняется, пока он общается.
-    """
-    now = datetime.now(timezone.utc).timestamp()
+async def subscribed_push_job(
+    context: ContextTypes.DEFAULT_TYPE,
+) -> None:
+    now       = datetime.now(timezone.utc).timestamp()
     SIX_HOURS = 6 * 3600
 
     for user in get_all_users():
@@ -697,7 +718,7 @@ async def subscribed_push_job(context: ContextTypes.DEFAULT_TYPE) -> None:
         if funnel_stage != "subscribed":
             continue
 
-        # ── 1. Юзер сам молчит ≥ 6 ч (last_active) ─────────────────────────
+        # 1. Юзер молчит ≥ 6 ч
         last_active_str = user.get("last_active")
         if not last_active_str:
             continue
@@ -706,19 +727,18 @@ async def subscribed_push_job(context: ContextTypes.DEFAULT_TYPE) -> None:
             if last_active_ts.tzinfo is None:
                 last_active_ts = last_active_ts.replace(tzinfo=timezone.utc)
             if now - last_active_ts.timestamp() < SIX_HOURS:
-                continue  # юзер недавно сам писал — не трогаем
+                continue
         except Exception:
             continue
 
-        # ── 2. Последний наш пуш был ≥ 6 ч назад (last_push_at) ─────────────
+        # 2. Последний пуш был ≥ 6 ч назад
         last_push_str = user.get("last_push_at")
-        if last_push_str:
-            try:
+        if last_push_str:try:
                 last_push_ts = datetime.fromisoformat(last_push_str)
                 if last_push_ts.tzinfo is None:
                     last_push_ts = last_push_ts.replace(tzinfo=timezone.utc)
                 if now - last_push_ts.timestamp() < SIX_HOURS:
-                    continue  # пуш уже был недавно — ждём
+                    continue
             except Exception:
                 pass
 
@@ -732,9 +752,9 @@ async def subscribed_push_job(context: ContextTypes.DEFAULT_TYPE) -> None:
         try:
             response, _, _, technique_used = await ask_valeria(
                 user_message=(
-                    "[PROACTIVE_PUSH] Generate a new hook to re-engage this user. "
-                    "Search for something real and urgent happening NOW. "
-                    "Do not reference previous conversation — fresh fact, fresh angle."
+                    "[PROACTIVE_PUSH] Generate a short re-engagement hook. "
+                    "Find something real and current. "
+                    "Do not reference previous conversation."
                 ),
                 history=history,
                 lang=lang,
@@ -750,10 +770,12 @@ async def subscribed_push_job(context: ContextTypes.DEFAULT_TYPE) -> None:
             await context.bot.send_chat_action(chat_id=user_id, action="typing")
             await asyncio.sleep(2.0)
             await context.bot.send_message(
-                chat_id=user_id, text=response, parse_mode=ParseMode.MARKDOWN,
+                chat_id=user_id,
+                text=response,
+                parse_mode=ParseMode.MARKDOWN,
             )
             add_ai_message(user_id, "assistant", response)
-            mark_push_sent(user_id)  # FIX: пишем только last_push_at, не трогаем last_active
+            mark_push_sent(user_id)
             logger.info(f"Proactive push → {user_id}")
         except TelegramError as e:
             logger.warning(f"Proactive push failed [{user_id}]: {e}")
@@ -762,7 +784,7 @@ async def subscribed_push_job(context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 # ════════════════════════════════════════════════════════════════════════════
-#  RE-ENGAGE JOB — неподписавшиеся (каждые 30 мин)
+#  RE-ENGAGE JOB
 # ════════════════════════════════════════════════════════════════════════════
 
 async def reengage_job(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -775,7 +797,7 @@ async def reengage_job(context: ContextTypes.DEFAULT_TYPE) -> None:
         lang         = user.get("lang", "en")
         interest     = user.get("interest", "betting")
 
-        if funnel_stage == "new":
+        if funnel_stage in ("new", "subscribed"):
             continue
         if funnel_stage not in ("cta", "tease", "warming"):
             continue
@@ -792,32 +814,47 @@ async def reengage_job(context: ContextTypes.DEFAULT_TYPE) -> None:
         except Exception:
             continue
 
-        ch       = CHANNELS.get(lang, CHANNELS["en"]).get(interest, CHANNELS["en"]["betting"])
+        ch = (
+            CHANNELS.get(lang, CHANNELS["en"])
+            .get(interest, CHANNELS["en"]["betting"])
+        )
         keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton(M.CTA.get(lang, "📲 OddsVault"), url=ch["url"])],
-            [InlineKeyboardButton(M.CTA_BUTTON_JOINED.get(lang, "✅"), callback_data="user_joined")],
+            [InlineKeyboardButton(
+                M.CTA.get(lang, "📲 OddsVault"),
+                url=ch["url"],
+            )],
+            [InlineKeyboardButton(
+                M.CTA_BUTTON_JOINED.get(lang, "✅"),
+                callback_data="user_joined",
+            )],
         ])
 
         if not user.get("reengage_1_sent") and elapsed >= REENGAGE_DELAY_1:
             text = M.REENGAGE_1.get(lang, M.REENGAGE_1.get("en", ""))
             try:
                 await context.bot.send_message(
-                    chat_id=user_id, text=text,
-                    parse_mode=ParseMode.MARKDOWN, reply_markup=keyboard,
+                    chat_id=user_id,
+                    text=text,
+                    parse_mode=ParseMode.MARKDOWN,
+                    reply_markup=keyboard,
                 )
                 update_user(user_id, reengage_1_sent=True)
                 logger.info(f"Re-engage 1 → {user_id}")
             except TelegramError as e:
                 logger.warning(f"Re-engage 1 failed [{user_id}]: {e}")
 
-        elif (user.get("reengage_1_sent")
-              and not user.get("reengage_2_sent")
-              and elapsed >= REENGAGE_DELAY_2):
+        elif (
+            user.get("reengage_1_sent")
+            and not user.get("reengage_2_sent")
+            and elapsed >= REENGAGE_DELAY_2
+        ):
             text = M.REENGAGE_2.get(lang, M.REENGAGE_2.get("en", ""))
             try:
                 await context.bot.send_message(
-                    chat_id=user_id, text=text,
-                    parse_mode=ParseMode.MARKDOWN, reply_markup=keyboard,
+                    chat_id=user_id,
+                    text=text,
+                    parse_mode=ParseMode.MARKDOWN,
+                    reply_markup=keyboard,
                 )
                 update_user(user_id, reengage_2_sent=True)
                 logger.info(f"Re-engage 2 → {user_id}")
@@ -829,7 +866,9 @@ async def reengage_job(context: ContextTypes.DEFAULT_TYPE) -> None:
 #  /help
 # ════════════════════════════════════════════════════════════════════════════
 
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def help_command(
+    update: Update, context: ContextTypes.DEFAULT_TYPE,
+) -> None:
     user = get_user(update.effective_user.id)
     lang = user.get("lang", "en")
     texts = {
@@ -859,12 +898,14 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(geo_chosen,      pattern=r"^geo_"))
     app.add_handler(CallbackQueryHandler(user_joined,     pattern=r"^user_joined$"))
 
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    app.add_handler(MessageHandler(
+        filters.TEXT & ~filters.COMMAND, handle_message,
+    ))
 
     app.job_queue.run_repeating(reengage_job,        interval=30 * 60, first=60)
     app.job_queue.run_repeating(subscribed_push_job, interval=60 * 60, first=120)
 
-    logger.info("OddsVault Bot v7.0 started 🚀  Valeria is online.")
+    logger.info("OddsVault Bot v6.0 started 🚀  Valeria is online.")
     app.run_polling(drop_pending_updates=True)
 
 
