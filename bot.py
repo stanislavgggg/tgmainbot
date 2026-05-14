@@ -79,12 +79,22 @@ def _prepare_context(user_id, user_text):
     if obj: log_objection(user_id, obj)
     return update_psychotype(user_id, user_text), get_objections(user_id), get_used_techniques(user_id)
 
-async def _send_tease(bot, user_id, chat_id, lang, interest):
+async def _send_tease(bot, user_id, chat_id, lang, interest, geo="OTHER", auto_cta=True):
     update_user(user_id, state=State.TEASE, funnel_stage="tease", stage_replies=0)
     text = M.get(M.TEASE, lang, interest)
     await bot.send_chat_action(chat_id, "typing")
     await asyncio.sleep(_typing_delay(text) * 0.7)
     await bot.send_message(chat_id=chat_id, text=text, parse_mode=ParseMode.MARKDOWN)
+
+    # Автоматически показываем CTA через паузу — не ждём реакции пользователя.
+    # Если пользователь ответит раньше — _handle_tease сам перейдёт в CTA.
+    if auto_cta:
+        await asyncio.sleep(7.0)
+        # Проверяем что состояние не изменилось (пользователь не ответил)
+        from storage import get_user as _gu
+        current = _gu(user_id)
+        if current.get("state") == State.TEASE and current.get("stage_replies", 0) == 0:
+            await _send_cta(bot, user_id, chat_id, lang, interest, geo)
 
 async def _send_cta(bot, user_id, chat_id, lang, interest, geo):
     update_user(user_id, state=State.CTA, funnel_stage="cta")
@@ -314,7 +324,8 @@ async def commitment_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # После commitment → tease
     await asyncio.sleep(2.5)
-    await _send_tease(context.bot, user_id, chat_id, lang, interest)
+    user_geo = get_user(user_id).get("geo", "OTHER")
+    await _send_tease(context.bot, user_id, chat_id, lang, interest, geo=user_geo)
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -598,7 +609,7 @@ async def _handle_warming(update, context, user_id, lang, interest, geo, user_te
 
     if next_stage == "tease":
         await asyncio.sleep(2.5)
-        await _send_tease(context.bot, user_id, chat_id, lang, interest)
+        await _send_tease(context.bot, user_id, chat_id, lang, interest, geo=geo)
     elif next_stage == "cta":
         await asyncio.sleep(2.5)
         await context.bot.send_chat_action(chat_id, "typing")
