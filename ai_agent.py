@@ -351,10 +351,12 @@ Stage: {stage_goal}
 ════ SEARCH RULE — CRITICAL ════
 {search_frame}
 
-Search silently. NEVER say "I'll search", "let me check", "I found online".
-Deliver search results as YOUR own read: "There's a match...", "I saw this...", "Right now..."
-
-IF SEARCH RETURNS NOTHING USEFUL: say something sharp and in-character without facts.
+Search silently. NEVER say "I'll search", "let me check", "I found online",
+"let me look", "searching for", "I need to find", "I'm looking".
+NEVER show your reasoning. NEVER write "Since it's [date]...", "Let me craft...",
+"The searches aren't returning...", "I'll try a different approach".
+Go STRAIGHT to the message. Zero meta-commentary. Zero thinking out loud.
+If search returns nothing — write a sharp in-character message WITHOUT mentioning it.
 DO NOT invent odds, bonuses, wagering numbers, or team names not in search results.
 DO NOT explain general concepts ("welcome bonuses typically carry 30-50x wagering" — NEVER).
 
