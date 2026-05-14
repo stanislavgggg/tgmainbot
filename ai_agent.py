@@ -416,12 +416,17 @@ async def ask_valeria(
     return raw, refined, next_stage, technique_used
 
 
-async def generate_warm_opener(lang: str, interest: str) -> str:
+async def generate_warm_opener(lang: str, interest: str, geo: str = "") -> str:
     """Первое сообщение воронки — реальная новость как крючок."""
     if not ANTHROPIC_KEY:
         return _fallback_response(lang, interest, "warming")
 
-    search_queries = _SEARCH_HOOKS.get(interest, _SEARCH_HOOKS["betting"])
+    # Если передано гео — строим запросы под него, иначе берём дефолты
+    if geo:
+        search_queries = _geo_search_queries(interest, geo)
+    else:
+        search_queries = _SEARCH_HOOKS.get(interest, _SEARCH_HOOKS["betting"])
+
     search_frame   = _SEARCH_FRAME.get(interest, _SEARCH_FRAME["betting"])
     lang_name = {
         "en": "English", "es": "Spanish (Spain, casual tú)",
