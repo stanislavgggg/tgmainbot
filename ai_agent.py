@@ -1,20 +1,21 @@
 """
 ai_agent.py — OddsVault Bot
-v7.0: Sonnet, исправленный search loop, короткий промпт + few-shot примеры.
+v8.0: Исправлен _run_with_search для web_search_20250305 (server-side tool).
 
-Главные исправления vs v6:
-  1. Модель → claude-sonnet-4-20250514
-  2. _run_with_search: tool_result теперь правильно берёт данные из
-     ответа сервера (stop_reason="tool_use"), а не из входных данных блока
-  3. System prompt сокращён в 3 раза — убраны дублирующие правила
-  4. Добавлены few-shot примеры правильного голоса прямо в промпт
-  5. Жёсткое правило: ТОЛЬКО факты из поиска, нет поиска — говори кратко
-     без выдумки, никакого "Welcome bonuses typically carry 30-50x..."
+Главные исправления vs v7:
+  1. _run_with_search: убран неправильный tool_use loop.
+     web_search_20250305 — server-side: сервер сам выполняет поиск и возвращает
+     результаты в том же ответе (stop_reason="end_turn"), блок называется
+     "server_tool_use" + "web_search_tool_result". Никаких tool_result от нас
+     не требуется. Предыдущий код читал block.get("content",[]) у tool_use блока
+     где его нет → "No results found." → Claude галлюцинировал.
+  2. _SEARCH_HOOKS["betting"]: убраны La Liga запросы, добавлена дата 2026,
+     фокус на HNL + актуальные матчи.
+  3. Убран import uuid (более не нужен).
 """
 
 import logging
 import re
-import uuid
 
 import httpx
 
@@ -35,10 +36,10 @@ WEB_SEARCH_TOOL = {
 # ── Поисковые запросы по интересу ────────────────────────────────────────────
 _SEARCH_HOOKS = {
     "betting": [
-        "La Liga odds value bet today",
-        "HNL Croatia football match odds today",
-        "Baltic football sharp money movement today",
-        "football line movement bookmakers today",
+        "HNL Croatia football odds value bet today 2026",
+        "Hajduk Split Dinamo Zagreb odds line movement today",
+        "Croatian football sharp money movement bookmakers today",
+        "HNL football match odds mispricing this week 2026",
     ],
     "casino": [
         "casino bonus low wagering offer this week",
@@ -163,7 +164,7 @@ def _system_prompt(
     lang_instruction = lang_map.get(lang, "English — casual, direct")
 
     interest_context = {
-        "betting":   "sports betting, value bets, odds analysis, La Liga, Croatian & Baltic leagues",
+        "betting":   "sports betting, value bets, odds analysis, Croatian HNL, Baltic leagues",
         "casino":    "casino bonuses, wagering requirements, RTP, cashback",
         "nodeposit": "no-deposit bonuses, free spins, low-wagering, expiry windows",
         "exclusive": "arbitrage, odds discrepancies, sharp money signals",
@@ -257,7 +258,21 @@ Funnel tags (invisible to user, place on own line at END of reply):
   [TECHNIQUE:name] — information_gap / social_proof_action / cost_of_inaction / pattern_interrupt / soft_takeaway"""
 
 
-# ── Agentic loop (ИСПРАВЛЕННЫЙ) ───────────────────────────────────────────────
+# ── Search loop ───────────────────────────────────────────────────────────────
+#
+# web_search_20250305 — это SERVER-SIDE инструмент.
+# Сервер сам выполняет поиск и возвращает результаты в ТОМ ЖЕ ответе:
+#
+#   content: [
+#     { type: "server_tool_use",       id: "srvtoolu_...", name: "web_search", input: {...} },
+#     { type: "web_search_tool_result", tool_use_id: "srvtoolu_...", content: [...] },
+#     { type: "text",                   text: "Based on search..." }
+#   ]
+#   stop_reason: "end_turn"
+#
+# Никакого второго витка с tool_result не нужно — stop_reason всегда end_turn.
+# Нам достаточно одного вызова; loop нужен только если Claude почему-то
+# вернул max_tokens (обрезало ответ) — тогда делаем continuation.
 
 def _extract_text(content_blocks: list) -> str:
     return "\n".join(
@@ -276,7 +291,7 @@ async def _run_with_search(
     system: str,
     messages: list[dict],
     headers: dict,
-    max_loops: int = 5,
+    max_loops: int = 3,
 ) -> str:
     payload = {
         "model":      MODEL,
@@ -297,38 +312,33 @@ async def _run_with_search(
             stop_reason  = data.get("stop_reason")
             last_content = data.get("content", [])
 
+            # Нормальный финиш — возвращаем text-блоки.
+            # web_search уже выполнен сервером; text-блок содержит итоговый ответ.
             if stop_reason == "end_turn":
                 return _extract_text(last_content)
 
+            # Обрезало по токенам — добавляем контент в историю и просим продолжить.
+            if stop_reason == "max_tokens":
+                partial = _extract_text(last_content)
+                if partial:
+                    payload["messages"] = payload["messages"] + [
+                        {"role": "assistant", "content": last_content},
+                        {"role": "user",      "content": "Continue."},
+                    ]
+                    continue
+                return partial
+
+            # tool_use здесь быть не должно для web_search (server-side),
+            # но на случай если API когда-нибудь изменит поведение — логируем.
             if stop_reason == "tool_use":
-                # Собираем tool_use блоки из ответа ассистента.
-                # Для web_search_20250305 результаты поиска уже находятся
-                # внутри block["content"] — это список документов/текстов.
-                tool_results = []
-                for block in last_content:
-                    if block.get("type") != "tool_use":
-                        continue
-                    tool_id        = block.get("id", str(uuid.uuid4()))
-                    search_content = block.get("content", [])
-                    # Если content пустой — значит поиск не вернул ничего
-                    if not search_content:
-                        search_content = [{"type": "text", "text": "No results found."}]
-                    tool_results.append({
-                        "type":        "tool_result",
-                        "tool_use_id": tool_id,
-                        "content":     search_content,
-                    })
+                logger.warning(
+                    "_run_with_search: unexpected stop_reason=tool_use — "
+                    "web_search_20250305 должен быть server-side. "
+                    "Проверьте версию API. Возвращаем частичный текст."
+                )
+                return _extract_text(last_content)
 
-                if not tool_results:
-                    return _extract_text(last_content)
-
-                payload["messages"] = payload["messages"] + [
-                    {"role": "assistant", "content": last_content},
-                    {"role": "user",      "content": tool_results},
-                ]
-                continue
-
-            # max_tokens или другой stop_reason
+            # Любой другой stop_reason — возвращаем что есть.
             return _extract_text(last_content)
 
     return _extract_text(last_content)
