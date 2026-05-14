@@ -388,15 +388,29 @@ async def _proactive_hook_job(context: ContextTypes.DEFAULT_TYPE):
 #  Fallback lang buttons (если показывались)
 # ════════════════════════════════════════════════════════════════════════════
 async def lang_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query; await query.answer()
-    lang  = query.data[len("lang_"):]
+    query   = update.callback_query
+    await query.answer()
+    lang    = query.data[len("lang_"):]
     user_id = query.from_user.id
+    chat_id = query.message.chat_id
+
     update_user(user_id, lang=lang, state=State.QUIZ)
+
+    # Убираем кнопки языков с фото (edit_message_reply_markup работает для фото)
+    try:
+        await query.edit_message_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+
+    # Отправляем QUIZ новым сообщением (нельзя edit_message_text на photo)
     quiz = M.QUIZ.get(lang, M.QUIZ.get("en", "What interests you?"))
     btns = M.QUIZ_BUTTONS.get(lang, M.QUIZ_BUTTONS.get("en", []))
     kb   = [[InlineKeyboardButton(lbl, callback_data=cb)] for lbl, cb in btns]
-    await query.edit_message_text(quiz, parse_mode=ParseMode.MARKDOWN,
-                                  reply_markup=InlineKeyboardMarkup(kb))
+    await context.bot.send_message(
+        chat_id=chat_id,
+        text=quiz,
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=InlineKeyboardMarkup(kb))
 
 
 # ════════════════════════════════════════════════════════════════════════════
