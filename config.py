@@ -1,15 +1,15 @@
 """
-config.py — OddsVault Bot
-Все env-переменные, каналы, State FSM, константы.
+config.py — OddsVault Bot v7
 """
 
 import os
+import glob
 from enum import Enum
 
 
 # ── Токены ──────────────────────────────────────────────────────────────────
-BOT_TOKEN      = os.getenv("BOT_TOKEN",      "")
-ANTHROPIC_KEY  = os.getenv("ANTHROPIC_API_KEY", "")
+BOT_TOKEN     = os.getenv("BOT_TOKEN", "")
+ANTHROPIC_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 
 
 # ── FSM States ───────────────────────────────────────────────────────────────
@@ -25,7 +25,6 @@ class State(str, Enum):
 
 
 # ── Каналы ───────────────────────────────────────────────────────────────────
-# FIX: добавлен "en" — без него KeyError при CTA у англоязычных юзеров
 CHANNELS: dict[str, dict[str, dict]] = {
     "en": {
         "betting":   {"url": "https://t.me/ApuestasGuruES",  "extra_url": ""},
@@ -40,22 +39,22 @@ CHANNELS: dict[str, dict[str, dict]] = {
         "exclusive": {"url": "https://t.me/ApuestasGuruES",  "extra_url": ""},
     },
     "hr": {
-        "betting":   {"url": "https://t.me/Bet_Croatia",   "extra_url": ""},
-        "casino":    {"url": "https://t.me/Bet_Croatia",   "extra_url": ""},
-        "nodeposit": {"url": "https://t.me/Bet_Croatia",   "extra_url": ""},
-        "exclusive": {"url": "https://t.me/Bet_Croatia",   "extra_url": ""},
+        "betting":   {"url": "https://t.me/Bet_Croatia",     "extra_url": ""},
+        "casino":    {"url": "https://t.me/Bet_Croatia",     "extra_url": ""},
+        "nodeposit": {"url": "https://t.me/Bet_Croatia",     "extra_url": ""},
+        "exclusive": {"url": "https://t.me/Bet_Croatia",     "extra_url": ""},
     },
     "lt": {
-        "betting":   {"url": "https://t.me/luckycasinoguru",    "extra_url": ""},
-        "casino":    {"url": "https://t.me/luckycasinoguru",    "extra_url": ""},
-        "nodeposit": {"url": "https://t.me/luckycasinoguru",    "extra_url": ""},
-        "exclusive": {"url": "https://t.me/luckycasinoguru",    "extra_url": ""},
+        "betting":   {"url": "https://t.me/luckycasinoguru", "extra_url": ""},
+        "casino":    {"url": "https://t.me/luckycasinoguru", "extra_url": ""},
+        "nodeposit": {"url": "https://t.me/luckycasinoguru", "extra_url": ""},
+        "exclusive": {"url": "https://t.me/luckycasinoguru", "extra_url": ""},
     },
     "lv": {
-        "betting":   {"url": "https://t.me/luckylatviaan",  "extra_url": ""},
-        "casino":    {"url": "https://t.me/luckylatviaan",  "extra_url": ""},
-        "nodeposit": {"url": "https://t.me/luckylatviaan",  "extra_url": ""},
-        "exclusive": {"url": "https://t.me/luckylatviaan",  "extra_url": ""},
+        "betting":   {"url": "https://t.me/luckylatviaan",   "extra_url": ""},
+        "casino":    {"url": "https://t.me/luckylatviaan",   "extra_url": ""},
+        "nodeposit": {"url": "https://t.me/luckylatviaan",   "extra_url": ""},
+        "exclusive": {"url": "https://t.me/luckylatviaan",   "extra_url": ""},
     },
 }
 
@@ -65,17 +64,27 @@ REENGAGE_DELAY_1 = 24 * 3600
 REENGAGE_DELAY_2 = 48 * 3600
 
 
-# ── Картинки по интересам ────────────────────────────────────────────────────
-INTEREST_IMAGES: dict[str, list[str]] = {
-    "betting":   [],
-    "casino":    [],
-    "nodeposit": [],
-    "exclusive": [],
-}
+# ── Картинки по интересам (авто-загрузка из папки assets/images/) ────────────
+def _load_images(base: str = "assets/images") -> dict[str, list[str]]:
+    result: dict[str, list[str]] = {}
+    for cat in ("betting", "casino", "nodeposit", "exclusive"):
+        folder = os.path.join(base, cat)
+        if os.path.exists(folder):
+            files = sorted(
+                glob.glob(os.path.join(folder, "*.jpg"))
+                + glob.glob(os.path.join(folder, "*.jpeg"))
+                + glob.glob(os.path.join(folder, "*.png"))
+            )
+            result[cat] = files
+        else:
+            result[cat] = []
+    return result
+
+INTEREST_IMAGES: dict[str, list[str]] = _load_images()
 
 
 # ── AI-чат ───────────────────────────────────────────────────────────────────
-FTD_PUSH_EVERY  = 5
-IMAGE_EVERY_N   = 4
-AI_MAX_HISTORY  = 20
-AI_MAX_TOKENS   = 350
+FTD_PUSH_EVERY  = 5    # FTD-пуш каждые N сообщений в AI_CHAT
+IMAGE_EVERY_N   = 4    # картинка каждые N сообщений
+AI_MAX_HISTORY  = 20   # сколько сообщений хранить в памяти
+AI_MAX_TOKENS   = 400  # макс токенов ответа
