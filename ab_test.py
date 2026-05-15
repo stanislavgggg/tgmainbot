@@ -33,7 +33,7 @@ HOOK_VARIANTS: dict[str, dict[str, str]] = {
             "Built this bot so I can share what I find with more people at once.\n\n"
             "I'm not selling anything. No subscriptions, no fees. "
             "I just drop what I find into a channel — and people are already making the most of it.\n\n"
-            "Which language do you want to continue in?"
+            "Quick question — how did you end up here? Recommendation or you found it yourself?"
         ),
         "es": (
             "Oye.\n\n"
@@ -42,7 +42,7 @@ HOOK_VARIANTS: dict[str, dict[str, str]] = {
             "Creé esto para compartir lo que encuentro con más gente a la vez.\n\n"
             "No vendo nada. Sin suscripciones, sin tarifas. "
             "Solo comparto lo que encuentro — y la gente ya está sacando partido.\n\n"
-            "¿En qué idioma seguimos?"
+            "Pregunta rápida — ¿cómo llegaste aquí? ¿Recomendación o lo encontraste tú mismo?"
         ),
         "hr": (
             "Hej.\n\n"
@@ -51,7 +51,7 @@ HOOK_VARIANTS: dict[str, dict[str, str]] = {
             "Napravila sam ovo da mogu dijeliti što pronađem s više ljudi odjednom.\n\n"
             "Ništa ne prodajem. Bez pretplata, bez naknada. "
             "Samo dijelim što pronađem — i ima ljudi koji već izvlače korist.\n\n"
-            "Na kojem jeziku nastavljamo?"
+            "Brzo pitanje — kako si završio ovdje? Preporuka ili si sam pronašao?"
         ),
         "lt": (
             "Sveiki.\n\n"
@@ -60,7 +60,7 @@ HOOK_VARIANTS: dict[str, dict[str, str]] = {
             "Sukūriau tai kad galėčiau dalintis tuo, ką randu, su daugiau žmonių.\n\n"
             "Nieko neparduodu. Jokių prenumeratų, jokių mokesčių. "
             "Tiesiog dalinausi tuo, ką randu — ir žmonės jau iš to gauna naudos.\n\n"
-            "Kuria kalba tęsiame?"
+            "Greitas klausimas — kaip čia atsidūrei? Rekomendacija ar pats radai?"
         ),
         "lv": (
             "Sveiki.\n\n"
@@ -69,18 +69,18 @@ HOOK_VARIANTS: dict[str, dict[str, str]] = {
             "Izveidoju šo lai varētu dalīties ar to, ko atrodu, ar vairāk cilvēkiem.\n\n"
             "Es neko nepārdodu. Nav abonementu, nav maksas. "
             "Vienkārši dalūos ar to, ko atrodu — un cilvēki jau no tā gūst labumu.\n\n"
-            "Kurā valodā turpinām?"
+            "Ātrs jautājums — kā tu šeit nokļuvi? Ieteikums vai pats atradai?"
         ),
     },
     "B": {
-        # Эмоциональный — история момента, FOMO, без сухих фактов
+        # Эмоциональный — история момента, без вопроса о языке
         "en": (
             "Last Tuesday, three people I know caught a line that was sitting *completely wrong*.\n\n"
             "Not because they're geniuses. Because they were in the right place when I posted it. "
             "The window was about 40 minutes. Then the market corrected.\n\n"
             "I'm *Valeria*. I find these moments — odds gaps, bonus windows, sharp money moves — "
             "before they close. And I share them.\n\n"
-            "Which language do you want to continue in? 🎯"
+            "How did you end up here — recommendation or you found it yourself? 🎯"
         ),
         "es": (
             "El martes pasado, tres personas que conozco pillaron una cuota que estaba *completamente mal calculada*.\n\n"
@@ -88,7 +88,7 @@ HOOK_VARIANTS: dict[str, dict[str, str]] = {
             "La ventana fue de unos 40 minutos. Luego el mercado corrigió.\n\n"
             "Soy *Valeria*. Encuentro estos momentos — gaps en cuotas, ventanas de bonos, movimientos de dinero inteligente — "
             "antes de que se cierren. Y los comparto.\n\n"
-            "¿En qué idioma seguimos? 🎯"
+            "¿Cómo llegaste aquí — recomendación o lo encontraste tú mismo? 🎯"
         ),
         "hr": (
             "Prošlog utorka, troje ljudi koje poznajem uhvatilo je kvotu koja je bila *potpuno pogrešna*.\n\n"
@@ -96,7 +96,7 @@ HOOK_VARIANTS: dict[str, dict[str, str]] = {
             "Prozor je bio oko 40 minuta. Onda je tržište ispravilo.\n\n"
             "Ja sam *Valerija*. Pronalazim te trenutke — jazzovi u kvotama, bonus prozori, pokreti pametnog novca — "
             "prije nego se zatvore. I dijelim ih.\n\n"
-            "Na kojem jeziku nastavljamo? 🎯"
+            "Kako si završio ovdje — preporuka ili si sam pronašao? 🎯"
         ),
         "lt": (
             "Praeitą antradienį trys žmonės kuriuos pažįstu sugavo koeficientą kuris buvo *visiškai klaidingas*.\n\n"
@@ -104,7 +104,7 @@ HOOK_VARIANTS: dict[str, dict[str, str]] = {
             "Langas buvo apie 40 minučių. Tada rinka pasitaisė.\n\n"
             "Aš esu *Valerija*. Randu šiuos momentus — koeficientų spragas, bonusų langus, protingų pinigų judėjimą — "
             "prieš jiems užsiverdant. Ir dalinuosi jais.\n\n"
-            "Kuria kalba tęsiame? 🎯"
+            "Kaip čia atsidūrei — rekomendacija ar pats radai? 🎯"
         ),
         "lv": (
             "Pagājušajā otrdienā trīs cilvēki ko pazīstu noķēra koeficientu kas bija *pilnīgi nepareizs*.\n\n"
@@ -112,37 +112,21 @@ HOOK_VARIANTS: dict[str, dict[str, str]] = {
             "Logs bija apmēram 40 minūtes. Tad tirgus koriģēja.\n\n"
             "Es esmu *Valerija*. Es atrodu šos mirkļus — koeficientu atstarpes, bonusu logus, gudras naudas kustības — "
             "pirms tie aizveras. Un daloties ar tiem.\n\n"
-            "Kurā valodā turpinām? 🎯"
+            "Kā tu šeit nokļuvi — ieteikums vai pats atradai? 🎯"
         ),
     },
     "C": {
-        # Провокационный — вопрос без представления, интрига
-        "en": (
-            "Quick question before I let you in 🔐\n\n"
-            "*What interests you most right now?*"
-            # Note: C variant goes straight to quiz — no intro text, max intrigue
-        ),
-        "es": (
-            "Una pregunta rápida antes de dejarte pasar 🔐\n\n"
-            "*¿Qué te interesa más ahora mismo?*"
-        ),
-        "hr": (
-            "Brzo pitanje prije nego te pustim unutra 🔐\n\n"
-            "*Što te sada najviše zanima?*"
-        ),
-        "lt": (
-            "Greitas klausimas prieš praleisdama tave 🔐\n\n"
-            "*Kas tave labiausiai domina dabar?*"
-        ),
-        "lv": (
-            "Ātrs jautājums pirms ielaižu tevi iekšā 🔐\n\n"
-            "*Kas tevi tagad interesē visvairāk?*"
-        ),
+        # Провокационный — сразу вопрос, минимум текста
+        "en":  "Quick question before I let you in 🔐\n\n*How did you end up here — recommendation or you found it yourself?*",
+        "es":  "Pregunta rápida antes de dejarte pasar 🔐\n\n*¿Cómo llegaste aquí — recomendación o lo encontraste tú mismo?*",
+        "hr":  "Brzo pitanje prije nego te pustim unutra 🔐\n\n*Kako si završio ovdje — preporuka ili si sam pronašao?*",
+        "lt":  "Greitas klausimas prieš praleisdama tave 🔐\n\n*Kaip čia atsidūrei — rekomendacija ar pats radai?*",
+        "lv":  "Ātrs jautājums pirms ielaižu tevi iekšā 🔐\n\n*Kā tu šeit nokļuvi — ieteikums vai pats atradai?*",
     },
 }
 
-# Вариант C идёт сразу к QUIZ без отдельного HOOK сообщения
-VARIANT_C_SKIPS_HOOK = True
+# Вариант C идёт в диалог сразу — без отдельного HOOK
+VARIANT_C_SKIPS_HOOK = False  # теперь не нужен — вопрос встроен в caption
 
 # ── Метрики ───────────────────────────────────────────────────────────────────
 
