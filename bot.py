@@ -1,16 +1,4 @@
-“””
-bot.py — OddsVault Bot v10
-
-ИСПРАВЛЕНИЯ:
-
-1. /start: HOOK (представление Валерии) → пауза → QUIZ. Не объединять в одно.
-1. GEO-квиз: отправляется через send_message (не edit), timeout увеличен
-1. Fallback не повторяется бесконечно: счётчик fallback_count, после 2 → переходим к tease
-1. API key диагностика при старте — видно сразу если не прописан
-1. handle_message логирует каждый входящий запрос для отладки
-1. ask_valeria: логирует реальную ошибку API, не глотает молча
-   “””
-   import asyncio, logging, os, random, sys, atexit
+import asyncio, logging, os, random, sys, atexit
    from datetime import datetime, timezone
    from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
    from telegram.constants import ParseMode
