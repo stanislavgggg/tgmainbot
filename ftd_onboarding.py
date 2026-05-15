@@ -1,664 +1,376 @@
 """
-ftd_onboarding.py — OddsVault Bot v11
-
-Полный онбординг после подписки на канал.
-Цель: провести пользователя от "подписался" до первого депозита (FTD).
-
-FLOW после нажатия "I'm already in":
-  T+0s   → POST_SUB (уже есть в bot.py) — тёплое приветствие
-  T+90s  → STEP_1: персональный breakdown бонуса/стратегии под интерес
-  T+30m  → STEP_2: конкретный первый шаг ("вот что делают прямо сейчас")
-  T+2h   → STEP_3: follow-up ("как результат?") — если молчат
-  T+6h   → STEP_4: urgency push — последний толчок с дедлайном
-  T+24h  → REENGAGE — если так и не написали (стандартный re-engage)
-
-Каждый шаг:
-  - Проверяет что юзер ещё не сделал FTD (не написал о депозите)
-  - Если юзер сам написал между шагами → шаг отменяется (не спамим)
-  - Персонализирован под lang + interest + profile
+ftd_onboarding.py — OddsVault Bot v13
+Adaptive onboarding with barrier classification + FTD celebration + repeat FTD machine.
 """
-
-import asyncio
-import logging
-from datetime import datetime, timezone, timedelta
+import asyncio, json, logging, re
+from datetime import datetime, timezone
 from typing import Optional
-
 from telegram.error import TelegramError
 from telegram.constants import ParseMode
-
-from storage import get_user, add_ai_message, mark_push_sent, get_profile, get_ai_history
-from ai_agent import _post_with_retry, _fallback_response, _build_profile_ctx, ANTHROPIC_URL, MODEL, ANTHROPIC_KEY
+from storage import (get_user, update_user, add_ai_message, mark_push_sent,
+                     get_profile, get_ai_history, get_psychotype, get_objections)
+from ai_agent import (_post_with_retry, _build_profile_ctx, _build_obj_summary,
+                      ANTHROPIC_URL, MODEL, ANTHROPIC_KEY, _sanitize_history)
 
 logger = logging.getLogger(__name__)
+BARRIERS = ("no_money","no_trust","dont_understand","not_urgent","already_elsewhere","thinking","unknown")
+VIP_FTD_THRESHOLD = 2
 
-
-# ════════════════════════════════════════════════════════════════════════════
-#  Статичные тексты онбординга (fallback если API недоступен)
-# ════════════════════════════════════════════════════════════════════════════
-
-_STEP1_FALLBACK: dict[str, dict[str, str]] = {
-    "en": {
-        "betting": (
-            "Here's how the sharp side actually works 🎯\n\n"
-            "The channel posts before lines move. That gap — between when the signal appears "
-            "and when the public catches up — is usually *15–45 minutes*.\n\n"
-            "Most people wait for confirmation. The ones making money act in that window.\n\n"
-            "What's your usual stake size? I want to make sure what I flag is relevant for you."
-        ),
-        "casino": (
-            "Let me break down how the bonus actually works 💎\n\n"
-            "The channel posts bonuses with *real wagering math* — not just the headline number. "
-            "A ×8 wagering on €50 = €400 to play through. At 96% RTP that's about *€16 expected cost*.\n\n"
-            "Most people don't know this and lose money on 'good' bonuses.\n\n"
-            "What kind of games do you usually play — slots, live tables, or both?"
-        ),
-        "nodeposit": (
-            "No-deposit is the easiest first step 🎁\n\n"
-            "Here's the math: €25 free, ×10 wagering = €250 to play through. "
-            "At 96% RTP slots that's *~€10 expected cost* — but the upside is real cash.\n\n"
-            "The key is picking the right games. Low volatility slots clear wagering fastest.\n\n"
-            "Have you done any no-deposit offers before, or would this be your first?"
-        ),
-        "exclusive": (
-            "Here's what the channel actually gives you 🔥\n\n"
-            "Two types of edges: *value bets* (line mispricing, usually 0.3–0.5 off true odds) "
-            "and *bonus arbitrage* (free money from promotions with positive EV).\n\n"
-            "Most people only use one. Combining both is where the consistent edge comes from.\n\n"
-            "Which side are you more comfortable with — the betting lines or the bonus math?"
-        ),
-    },
-    "es": {
-        "betting": (
-            "Así funciona el lado inteligente 🎯\n\n"
-            "El canal publica antes de que las cuotas se muevan. Esa ventana — entre cuando "
-            "aparece la señal y cuando el público reacciona — suele ser *15–45 minutos*.\n\n"
-            "La mayoría espera confirmación. Los que ganan actúan en esa ventana.\n\n"
-            "¿Cuál es tu apuesta habitual? Quiero asegurarme de que lo que te señalo sea relevante."
-        ),
-        "casino": (
-            "Te explico cómo funciona el bono de verdad 💎\n\n"
-            "El canal publica bonos con *la matemática real del wagering* — no solo el titular. "
-            "Un ×8 sobre €50 = €400 a jugar. Con RTP del 96% son unos *€16 de coste esperado*.\n\n"
-            "La mayoría no sabe esto y pierde con bonos 'buenos'.\n\n"
-            "¿Qué tipo de juegos sueles usar — slots, mesas en vivo, o los dos?"
-        ),
-        "nodeposit": (
-            "El sin depósito es el primer paso más fácil 🎁\n\n"
-            "La matemática: €25 gratis, ×10 wagering = €250 a jugar. "
-            "Con slots al 96% RTP eso son *~€10 de coste esperado* — pero el upside es dinero real.\n\n"
-            "La clave es elegir los juegos correctos. Los slots de baja volatilidad liberan el wagering más rápido.\n\n"
-            "¿Has usado algún bono sin depósito antes o sería el primero?"
-        ),
-        "exclusive": (
-            "Esto es lo que te da el canal de verdad 🔥\n\n"
-            "Dos tipos de ventaja: *value bets* (error en cuotas, suele ser 0.3–0.5 de diferencia) "
-            "y *arbitraje de bonos* (dinero gratis de promociones con EV positivo).\n\n"
-            "La mayoría solo usa uno. Combinar los dos es donde está el edge consistente.\n\n"
-            "¿Con cuál te sientes más cómodo — las cuotas o la matemática de bonos?"
-        ),
-    },
-    "hr": {
-        "betting": (
-            "Evo kako zapravo funkcionira pametna strana 🎯\n\n"
-            "Kanal objavljuje prije nego se kvote pomaknu. Taj prozor — između kada se signal pojavi "
-            "i kada javnost reagira — obično je *15–45 minuta*.\n\n"
-            "Većina čeka potvrdu. Oni koji zarađuju djeluju u tom prozoru.\n\n"
-            "Koliki ti je uobičajeni ulog? Želim osigurati da je ono što ti naglasim relevantno."
-        ),
-        "casino": (
-            "Razložit ću ti kako bonus zapravo funkcionira 💎\n\n"
-            "Kanal objavljuje bonuse s *pravom matematikom wagering-a* — ne samo naslovni broj. "
-            "×8 na €50 = €400 za proigravanje. Pri RTP-u 96% to je *~€16 očekivanog troška*.\n\n"
-            "Većina toga ne zna i gubi na 'dobrim' bonusima.\n\n"
-            "Koje igre obično igraš — slotove, live stolove, ili oboje?"
-        ),
-        "nodeposit": (
-            "Bez depozita je najlakši prvi korak 🎁\n\n"
-            "Matematika: €25 besplatno, ×10 wagering = €250 za proigravanje. "
-            "Na slotovima s RTP 96% to je *~€10 očekivanog troška* — ali potencijal je pravi novac.\n\n"
-            "Ključ je odabir pravih igara. Slotovi niske volatilnosti najbrže čiste wagering.\n\n"
-            "Jesi li ikad koristio ponudu bez depozita ili bi ovo bilo prvo?"
-        ),
-        "exclusive": (
-            "Evo što ti kanal zapravo daje 🔥\n\n"
-            "Dvije vrste prednosti: *value bets* (pogreška u kvotama, obično 0.3–0.5 razlike) "
-            "i *bonus arbitraža* (besplatan novac iz promocija s pozitivnim EV-om).\n\n"
-            "Većina koristi samo jedno. Kombiniranje obaju je gdje dolazi dosljedna prednost.\n\n"
-            "Čime se osjećaš ugodnije — kvotama ili matematikom bonusa?"
-        ),
-    },
-    "lt": {
-        "betting": (
-            "Štai kaip iš tikrųjų veikia protinga pusė 🎯\n\n"
-            "Kanalas publikuoja prieš koeficientams judant. Tas langas — tarp signalo pasirodymo "
-            "ir visuomenės reakcijos — paprastai yra *15–45 minutės*.\n\n"
-            "Dauguma laukia patvirtinimo. Tie kurie uždirba veikia per tą langą.\n\n"
-            "Koks tavo įprastas statymas? Noriu įsitikinti kad tai ką pažymiu bus aktualu."
-        ),
-        "casino": (
-            "Leisk man paaiškinti kaip bonusas iš tikrųjų veikia 💎\n\n"
-            "Kanalas publikuoja bonusus su *tikrąja wagering matematika* — ne tik antraštę. "
-            "×8 nuo €50 = €400 sužaisti. Su 96% RTP tai yra *~€16 tikėtinų išlaidų*.\n\n"
-            "Dauguma to nežino ir pralaimi su 'gerais' bonusais.\n\n"
-            "Kokius žaidimus paprastai žaidi — slotus, live stalus, ar abu?"
-        ),
-        "nodeposit": (
-            "Be depozito yra lengviausias pirmas žingsnis 🎁\n\n"
-            "Matematika: €25 nemokamai, ×10 wagering = €250 sužaisti. "
-            "Su 96% RTP slotais tai yra *~€10 tikėtinų išlaidų* — bet potencialas yra tikri pinigai.\n\n"
-            "Raktas yra tinkamų žaidimų pasirinkimas. Mažo nepastovumo slotai greičiausiai išvalo wagering.\n\n"
-            "Ar esi naudojęs be depozito pasiūlymą anksčiau ar tai būtų pirmas?"
-        ),
-        "exclusive": (
-            "Štai ką kanalas iš tikrųjų suteikia 🔥\n\n"
-            "Du pranašumų tipai: *value bets* (klaida koeficientuose, paprastai 0.3–0.5 skirtumas) "
-            "ir *bonusų arbitražas* (nemokamas pinigai iš akcijų su teigiamu EV).\n\n"
-            "Dauguma naudoja tik vieną. Abiejų derinimas yra nuoseklaus pranašumo šaltinis.\n\n"
-            "Su kuo jautiesi patogiau — koeficientais ar bonusų matematika?"
-        ),
-    },
-    "lv": {
-        "betting": (
-            "Lūk kā gudrā puse patiesībā darbojas 🎯\n\n"
-            "Kanāls publicē pirms koeficienti kustas. Tas logs — starp signāla parādīšanos "
-            "un sabiedrības reakciju — parasti ir *15–45 minūtes*.\n\n"
-            "Vairākums gaida apstiprinājumu. Tie kas pelna rīkojas tajā logā.\n\n"
-            "Kāds ir tavs parastais likums? Gribu pārliecināties ka tas ko atzīmēju būs relevants."
-        ),
-        "casino": (
-            "Ļauj man izskaidrot kā bonuss patiesībā darbojas 💎\n\n"
-            "Kanāls publicē bonusus ar *īstu wagering matemātiku* — ne tikai virsrakstu. "
-            "×8 no €50 = €400 nospēlēt. Ar 96% RTP tas ir *~€16 paredzamo izmaksu*.\n\n"
-            "Vairākums to nezina un zaudē uz 'labiem' bonusiem.\n\n"
-            "Kādas spēles parasti spēlē — slotus, live galdiņus vai abus?"
-        ),
-        "nodeposit": (
-            "Bez depozīta ir vieglākais pirmais solis 🎁\n\n"
-            "Matemātika: €25 bez maksas, ×10 wagering = €250 nospēlēt. "
-            "Ar 96% RTP slotiem tas ir *~€10 paredzamo izmaksu* — bet potenciāls ir īsta nauda.\n\n"
-            "Atslēga ir pareizo spēļu izvēle. Zemas nepastāvības sloti ātrāk attīra wagering.\n\n"
-            "Vai esi izmantojis bez depozīta piedāvājumu iepriekš vai tas būtu pirmais?"
-        ),
-        "exclusive": (
-            "Lūk ko kanāls patiesībā dod 🔥\n\n"
-            "Divi priekšrocību veidi: *value bets* (kļūda koeficientos, parasti 0.3–0.5 starpība) "
-            "un *bonusu arbitrāža* (bezmaksas nauda no akcijām ar pozitīvu EV).\n\n"
-            "Vairākums izmanto tikai vienu. Abu apvienošana ir pastāvīgu priekšrocību avots.\n\n"
-            "Ar ko jūties ērtāk — koeficientiem vai bonusu matemātiku?"
-        ),
-    },
-}
-
-_STEP2_FALLBACK: dict[str, dict[str, str]] = {
-    "en": {
-        "betting":   "There's a line moving in the channel right now that fits exactly what we talked about. *The window is open.* What's stopping you from taking a position today?",
-        "casino":    "The bonus I mentioned earlier — wagering is still at ×8. *That resets tomorrow.* Have you looked at the channel yet or still deciding?",
-        "nodeposit": "That no-deposit window closes at midnight. *€25 free, no risk.* If not today — when? Serious question.",
-        "exclusive": "Three value gaps posted in the channel in the last 6 hours. People already positioned. *What's your first move going to be?*",
-    },
-    "es": {
-        "betting":   "Hay una cuota moviéndose en el canal ahora mismo que encaja con lo que hablamos. *La ventana está abierta.* ¿Qué te impide tomar una posición hoy?",
-        "casino":    "El bono que mencioné antes — el wagering sigue en ×8. *Se resetea mañana.* ¿Ya has visto el canal o todavía lo estás decidiendo?",
-        "nodeposit": "Esa ventana sin depósito cierra a medianoche. *€25 gratis, sin riesgo.* Si no hoy — ¿cuándo? Pregunta en serio.",
-        "exclusive": "Tres gaps de valor publicados en el canal en las últimas 6 horas. La gente ya está posicionada. *¿Cuál va a ser tu primer movimiento?*",
-    },
-    "hr": {
-        "betting":   "U kanalu se sada kreće kvota koja točno odgovara onome o čemu smo pričali. *Prozor je otvoren.* Što te sprečava da danas zauzmеš poziciju?",
-        "casino":    "Bonus koji sam ranije spominjala — wagering je još na ×8. *Resetira se sutra.* Jesi li već pogledao kanal ili se još odlučuješ?",
-        "nodeposit": "Taj prozor bez depozita zatvara se u ponoć. *€25 besplatno, bez rizika.* Ako ne danas — kada? Ozbiljno pitanje.",
-        "exclusive": "Tri value gapa objavljena u kanalu u zadnjih 6 sati. Ljudi su već pozicionirani. *Koji će biti tvoj prvi potez?*",
-    },
-    "lt": {
-        "betting":   "Kanale dabar juda koeficientas kuris tiksliai atitinka tai apie ką kalbėjome. *Langas yra atviras.* Kas trukdo šiandien užimti poziciją?",
-        "casino":    "Bonusas kurį minėjau anksčiau — wagering vis dar ×8. *Rytoj atsigamins.* Ar jau peržiūrėjai kanalą ar dar sprendžiasi?",
-        "nodeposit": "Tas be depozito langas užsidaro vidurnaktį. *€25 nemokamai, be rizikos.* Jei ne šiandien — kada? Rimtas klausimas.",
-        "exclusive": "Per paskutines 6 valandas kanale paskelbti trys value tarpai. Žmonės jau pozicionuoti. *Koks bus tavo pirmas žingsnis?*",
-    },
-    "lv": {
-        "betting":   "Kanālā tagad kustas koeficients kas precīzi atbilst tam par ko runājām. *Logs ir atvērts.* Kas kavē šodien ieņemt pozīciju?",
-        "casino":    "Bonuss ko minēju agrāk — wagering joprojām ×8. *Atjaunojas rīt.* Vai jau apskatīji kanālu vai vēl izlemj?",
-        "nodeposit": "Tas bez depozīta logs aizveras pusnaktī. *€25 bez maksas, bez riska.* Ja ne šodien — kad? Nopietns jautājums.",
-        "exclusive": "Pēdējo 6 stundu laikā kanālā publicētas trīs value atstarpes. Cilvēki jau pozicionēti. *Kāds būs tavs pirmais gājiens?*",
-    },
-}
-
-_STEP3_FALLBACK: dict[str, dict[str, str]] = {
-    "en": {
-        "betting":   "Hey — how did it go? Did you catch anything from the channel today? Even just watching the line movements tells you a lot. 🎯",
-        "casino":    "Checking in — did you look at the bonus details? Sometimes the wagering math changes things. Happy to walk through it with you if you want. 💎",
-        "nodeposit": "Still thinking about it? The no-deposit is the lowest possible risk — literally free to try. What's holding you back? 🎁",
-        "exclusive": "Any questions after looking at the channel? The first move is always the hardest. I can help you pick the right entry point. 🔥",
-    },
-    "es": {
-        "betting":   "Oye — ¿cómo fue? ¿Pillaste algo del canal hoy? Incluso solo ver los movimientos de cuotas te dice mucho. 🎯",
-        "casino":    "Un check — ¿miraste los detalles del bono? A veces la matemática del wagering cambia las cosas. Puedo explicártelo si quieres. 💎",
-        "nodeposit": "¿Todavía lo estás pensando? El sin depósito es el menor riesgo posible — literalmente gratis para probar. ¿Qué te frena? 🎁",
-        "exclusive": "¿Alguna pregunta después de ver el canal? El primer movimiento siempre es el más difícil. Puedo ayudarte a elegir el punto de entrada correcto. 🔥",
-    },
-    "hr": {
-        "betting":   "Hej — kako je prošlo? Jesi li uhvatio nešto iz kanala danas? Čak i samo gledanje kretanja kvota govori ti puno. 🎯",
-        "casino":    "Provjera — jesi li pogledao detalje bonusa? Ponekad matematika wageringa mijenja stvari. Rado ću ti to objasniti ako želiš. 💎",
-        "nodeposit": "Još razmišljaš? Bez depozita je najmanji mogući rizik — doslovno besplatno za isprobati. Što te koči? 🎁",
-        "exclusive": "Imaš li pitanja nakon pregledavanja kanala? Prvi potez je uvijek najtežji. Mogu ti pomoći odabrati pravo ulazišno točku. 🔥",
-    },
-    "lt": {
-        "betting":   "Ei — kaip sekėsi? Ar šiandien kanalas sugavo ką nors? Net ir tik stebėdamas koeficientų judėjimus daug sužinosi. 🎯",
-        "casino":    "Patikrinimas — ar peržiūrėjai bonuso detales? Kartais wagering matematika keičia situaciją. Galiu paaiškinti jei nori. 💎",
-        "nodeposit": "Dar galvoji? Be depozito yra mažiausia galima rizika — tiesiogiai nemokamai išbandyti. Kas stabdo? 🎁",
-        "exclusive": "Ar yra klausimų po kanalo peržiūros? Pirmas žingsnis visada yra sunkiausias. Galiu padėti pasirinkti tinkamą įėjimo tašką. 🔥",
-    },
-    "lv": {
-        "betting":   "Ei — kā gāja? Vai šodien kaut ko noķēri no kanāla? Pat tikai vērojot koeficientu kustību daudz uzzini. 🎯",
-        "casino":    "Pārbaude — vai apskatīji bonusa detaļas? Dažreiz wagering matemātika maina lietas. Labprāt izskaidrošu ja gribi. 💎",
-        "nodeposit": "Vēl domā? Bez depozīta ir mazākais iespējamais risks — burtiski bezmaksas izmēģināt. Kas kavē? 🎁",
-        "exclusive": "Vai ir jautājumi pēc kanāla apskatīšanas? Pirmais gājiens vienmēr ir grūtākais. Varu palīdzēt izvēlēties pareizo ieejas punktu. 🔥",
-    },
-}
-
-_STEP4_FALLBACK: dict[str, dict[str, str]] = {
-    "en": {
-        "betting":   "Last thing I'll say unprompted — there's a match tomorrow where the line is sitting *off* from where it should be. I'll post it tonight. After that I go quiet unless you write first. 🎯",
-        "casino":    "I'll be direct: the bonus window closes tomorrow. After that the wagering goes back to standard terms. *This week's conditions are the best I've seen this month.* Up to you. 💎",
-        "nodeposit": "Okay, last nudge. The free bonus expires. After tomorrow there's no way in without a deposit. *This was the zero-risk entry.* Let me know if you change your mind. 🎁",
-        "exclusive": "I'm going quiet after this. But I want you to know — the gap we talked about is still open. The people who acted on it are already in profit. Your call. 🔥",
-    },
-    "es": {
-        "betting":   "Lo último que te digo sin que lo pidas — hay un partido mañana donde la cuota está *mal calculada*. Lo publicaré esta noche. Después me callo a menos que me escribas tú. 🎯",
-        "casino":    "Voy a ser directa: la ventana del bono cierra mañana. Después el wagering vuelve a condiciones estándar. *Las condiciones de esta semana son las mejores que he visto este mes.* Tú decides. 💎",
-        "nodeposit": "Bien, último empujón. El bono gratuito vence. Después de mañana no hay forma de entrar sin depósito. *Esta era la entrada de cero riesgo.* Dime si cambias de opinión. 🎁",
-        "exclusive": "Me voy a callar después de esto. Pero quiero que sepas — el gap del que hablamos sigue abierto. Los que actuaron ya están en beneficio. Tú decides. 🔥",
-    },
-    "hr": {
-        "betting":   "Zadnja stvar što ću reći bez poticaja — sutra ima utakmica gdje kvota *nije tamo gdje bi trebala biti*. Objavit ću večeras. Nakon toga šutim osim ako mi ti pišeš. 🎯",
-        "casino":    "Bit ću izravna: prozor bonusa zatvara se sutra. Nakon toga wagering se vraća na standardne uvjete. *Uvjeti ovog tjedna su najbolji koje sam vidjela ovog mjeseca.* Na tebi je. 💎",
-        "nodeposit": "U redu, zadnji poticaj. Besplatni bonus istječe. Nakon sutra nema načina bez depozita. *Ovo je bio ulaz bez rizika.* Javi mi ako promijeniš mišljenje. 🎁",
-        "exclusive": "Šutim nakon ovoga. Ali hoću da znaš — gap o kojem smo pričali je još uvijek otvoren. Oni koji su djelovali već su u plusu. Tvoj izbor. 🔥",
-    },
-    "lt": {
-        "betting":   "Paskutinis dalykas kurį pasakysiu be prašymo — rytoj yra rungtynės kur koeficientas *nėra ten kur turėtų būti*. Paskelbsiu šį vakarą. Po to tyliu jei pats nerašai. 🎯",
-        "casino":    "Būsiu tiesioginis: bonuso langas užsidaro rytoj. Po to wagering grįžta į standartines sąlygas. *Šios savaitės sąlygos yra geriausios kurias mačiau šį mėnesį.* Tau spręsti. 💎",
-        "nodeposit": "Gerai, paskutinis postūmis. Nemokamas bonusas baigiasi. Po rytojaus nėra būdo be depozito. *Tai buvo be rizikos įėjimas.* Pranesk jei pakeisi nuomonę. 🎁",
-        "exclusive": "Po šito tyliu. Bet noriu kad žinotum — tas tarpas apie kurį kalbėjome vis dar atviras. Tie kurie veikė jau yra pliuse. Tavo pasirinkimas. 🔥",
-    },
-    "lv": {
-        "betting":   "Pēdējā lieta ko teikšu bez aicinājuma — rīt ir spēle kur koeficients *nav tur kur vajadzētu būt*. Publicēšu šovakar. Pēc tam klusēju ja vien tu pats neraksti. 🎯",
-        "casino":    "Būšu tieša: bonusa logs aizveras rīt. Pēc tam wagering atgriežas standarta noteikumos. *Šīs nedēļas nosacījumi ir labākie ko esmu redzējusi šomēnes.* Tev izlemt. 💎",
-        "nodeposit": "Labi, pēdējais grūdiens. Bezmaksas bonuss beidzas. Pēc rīt nav veida bez depozīta. *Tā bija bezriska ieeja.* Paziņo ja mainīsi domas. 🎁",
-        "exclusive": "Pēc šī klusēju. Bet gribu lai zinātu — tas tarpas par ko runājām joprojām ir atvērts. Tie kas rīkojās jau ir plusā. Tavs lēmums. 🔥",
-    },
-}
-
-
-# ════════════════════════════════════════════════════════════════════════════
-#  AI-генерируемые шаги (если API доступен)
-# ════════════════════════════════════════════════════════════════════════════
-
-async def _generate_onboarding_step(
-    step: int,
-    lang: str,
-    interest: str,
-    user_profile: dict,
-    history: list,
-) -> Optional[str]:
-    """Генерирует онбординг сообщение через AI. Fallback если API недоступен."""
-    if not ANTHROPIC_KEY:
-        return None
-
-    lang_names = {
-        "en": "English", "es": "Spanish (Spain, tú)",
-        "hr": "Croatian", "lt": "Lithuanian", "lv": "Latvian",
-    }
-    language = lang_names.get(lang, "English")
-
-    interest_ctx = {
-        "betting":   "sports betting, value bets, sharp money, line movements",
-        "casino":    "casino bonuses, wagering requirements, RTP, cashback",
-        "nodeposit": "no-deposit bonuses, free spins, low wagering, first steps",
-        "exclusive": "arbitrage, value bets, bonus EV, combined strategy",
-    }.get(interest, "betting & bonuses")
-
-    profile_ctx = _build_profile_ctx(user_profile)
-
-    step_instructions = {
-        1: (
-            "This is the FIRST message after the user subscribed to the channel. "
-            "Break down SPECIFICALLY how the channel benefits them given their interest. "
-            "Use real math where possible (wagering calculations, expected value, timing windows). "
-            "End with ONE personal question about their experience or preference that makes the next message natural. "
-            "Tone: insider explaining to a friend, not a sales pitch. Warm, specific, direct."
-        ),
-        2: (
-            "This is 30 minutes after subscription. User has had time to look at the channel. "
-            "Create URGENCY around taking their first real action (first bet or first deposit). "
-            "Reference something happening NOW — a line moving, a bonus expiring, people already acting. "
-            "ONE direct question: what's stopping them, or what's their first move. "
-            "No soft talk — this is the push moment. 2-3 sentences max."
-        ),
-        3: (
-            "This is a follow-up 2 hours later. User hasn't responded. "
-            "Casual check-in — not pushy. Like a friend asking how it went. "
-            "Acknowledge they might be busy or still deciding. "
-            "ONE easy question that invites them back into conversation. "
-            "Very short — 2 sentences max."
-        ),
-        4: (
-            "This is the FINAL push — 6 hours after subscription with no action. "
-            "Be honest and direct: this is the last unprompted message. "
-            "Create final urgency (something expiring, window closing). "
-            "Make clear you'll go quiet after this unless they reach out. "
-            "Respectful, not desperate. 2-3 sentences."
-        ),
-    }
-
-    system = f"""You are Valeria — private AI companion for betting and bonuses.
-This is onboarding step {step} after user subscribed to the channel.
-Goal: move them to their first deposit (FTD) through natural conversation.
-
-Language: {language} ONLY.
-User interest: {interest_ctx}
-{profile_ctx}
-
-Step instructions: {step_instructions.get(step, '')}
-
-RULES:
-- NEVER sound like marketing copy or a bot
-- NEVER invent specific match names, odds numbers, or exact bonus amounts
-- NEVER say "I'm an AI" or reference being a bot
-- Use *bold* for 1-2 key numbers or concepts only
-- Max 3 sentences (step 1 can be 4-5). 1 emoji max at end.
-- End with a question OR a clear statement — never both
-- Tone: smart friend who has real insider knowledge"""
-
+# ── AI classifier ─────────────────────────────────────────────────────────────
+async def classify_barrier(history, lang, interest, psychotype) -> str:
+    if not ANTHROPIC_KEY or not history: return "unknown"
+    user_msgs = [m["content"] for m in history if m.get("role")=="user"][-8:]
+    if not user_msgs: return "unknown"
+    conversation = "\n".join(f"User: {m}" for m in user_msgs)
+    system = """Analyze user messages and return ONE of: no_money, no_trust, dont_understand, not_urgent, already_elsewhere, thinking, unknown. Reply ONLY the word."""
     try:
-        # Keep only last 6 messages for context
-        from ai_agent import _sanitize_history
-        clean_history = _sanitize_history(history[-6:])
+        data = await _post_with_retry(ANTHROPIC_URL,
+            {"model":MODEL,"max_tokens":15,"system":system,"messages":[{"role":"user","content":conversation}]},
+            {"x-api-key":ANTHROPIC_KEY,"anthropic-version":"2023-06-01","content-type":"application/json"},
+            timeout=10,max_retries=1)
+        result = next((b["text"].strip().lower() for b in data.get("content",[]) if b.get("type")=="text"),"unknown")
+        for b in BARRIERS:
+            if b in result: return b
+    except Exception as e: logger.debug(f"classify_barrier: {e}")
+    return "unknown"
 
-        data = await _post_with_retry(
-            ANTHROPIC_URL,
-            {
-                "model":      MODEL,
-                "max_tokens": 250,
-                "system":     system,
-                "messages":   clean_history + [
-                    {"role": "user", "content": f"[ONBOARDING_STEP_{step}]"}
-                ],
-            },
-            {
-                "x-api-key":         ANTHROPIC_KEY,
-                "anthropic-version": "2023-06-01",
-                "content-type":      "application/json",
-            },
-            timeout=20,
-        )
-        text = next(
-            (b["text"].strip() for b in data.get("content", []) if b.get("type") == "text"),
-            "",
-        )
-        if text and len(text) > 20:
-            # Clean markdown
-            import re
-            text = re.sub(r'\*\*(.+?)\*\*', r'*\1*', text)
-            return text
-    except Exception as e:
-        logger.error(f"Onboarding step {step} AI error: {e}")
-
-    return None
-
-
-# ════════════════════════════════════════════════════════════════════════════
-#  Проверка активности пользователя
-# ════════════════════════════════════════════════════════════════════════════
-
-def _user_active_since(user_id: int, since_ts: float) -> bool:
-    """Писал ли пользователь сам после given timestamp."""
-    user = get_user(user_id)
-    last_active_str = user.get("last_active", "")
-    if not last_active_str:
-        return False
-    try:
-        la = datetime.fromisoformat(last_active_str)
-        if la.tzinfo is None:
-            la = la.replace(tzinfo=timezone.utc)
-        return la.timestamp() > since_ts
-    except Exception:
-        return False
-
-def _user_ftd_done(user_id: int) -> bool:
-    """Пометили ли мы что юзер сделал FTD."""
-    return bool(get_user(user_id).get("ftd_done"))
-
-
-# ════════════════════════════════════════════════════════════════════════════
-#  Job функции (вызываются из job_queue)
-# ════════════════════════════════════════════════════════════════════════════
-
-async def onboarding_step1_job(context) -> None:
-    """T+90s: breakdown бонуса/стратегии под интерес."""
-    d        = context.job.data
-    user_id  = d["user_id"]
-    chat_id  = d["chat_id"]
-    lang     = d["lang"]
-    interest = d["interest"]
-    start_ts = d["start_ts"]
-
-    if _user_ftd_done(user_id):
-        return
-    # Если юзер сам написал после подписки — пропускаем шаг
-    if _user_active_since(user_id, start_ts):
-        logger.info(f"Onboarding step1 skipped — user {user_id} already active")
-        return
-
-    profile = get_profile(user_id)
-    history = get_ai_history(user_id)
-
-    text = await _generate_onboarding_step(1, lang, interest, profile, history)
-    if not text:
-        text = _STEP1_FALLBACK.get(lang, _STEP1_FALLBACK["en"]).get(interest, "")
-    if not text:
-        return
-
-    try:
-        await context.bot.send_chat_action(chat_id=chat_id, action="typing")
-        await asyncio.sleep(2.5)
-        await context.bot.send_message(
-            chat_id=chat_id, text=text, parse_mode=ParseMode.MARKDOWN)
-        add_ai_message(user_id, "assistant", text)
-        mark_push_sent(user_id)
-        logger.info(f"Onboarding step1 → {user_id}")
-    except TelegramError as e:
-        logger.warning(f"Onboarding step1 failed [{user_id}]: {e}")
-
-
-async def onboarding_step2_job(context) -> None:
-    """T+30min: urgency — конкретный первый шаг."""
-    d        = context.job.data
-    user_id  = d["user_id"]
-    chat_id  = d["chat_id"]
-    lang     = d["lang"]
-    interest = d["interest"]
-    start_ts = d["start_ts"]
-
-    if _user_ftd_done(user_id):
-        return
-    # Если юзер активен (написал что-то после step1) — не спамим
-    if _user_active_since(user_id, start_ts + 90):
-        logger.info(f"Onboarding step2 skipped — user {user_id} active")
-        return
-
-    profile = get_profile(user_id)
-    history = get_ai_history(user_id)
-
-    text = await _generate_onboarding_step(2, lang, interest, profile, history)
-    if not text:
-        text = _STEP2_FALLBACK.get(lang, _STEP2_FALLBACK["en"]).get(interest, "")
-    if not text:
-        return
-
-    try:
-        await context.bot.send_chat_action(chat_id=chat_id, action="typing")
-        await asyncio.sleep(3.0)
-        await context.bot.send_message(
-            chat_id=chat_id, text=text, parse_mode=ParseMode.MARKDOWN)
-        add_ai_message(user_id, "assistant", text)
-        mark_push_sent(user_id)
-        logger.info(f"Onboarding step2 → {user_id}")
-    except TelegramError as e:
-        logger.warning(f"Onboarding step2 failed [{user_id}]: {e}")
-
-
-async def onboarding_step3_job(context) -> None:
-    """T+2h: follow-up если молчат."""
-    d        = context.job.data
-    user_id  = d["user_id"]
-    chat_id  = d["chat_id"]
-    lang     = d["lang"]
-    interest = d["interest"]
-    start_ts = d["start_ts"]
-
-    if _user_ftd_done(user_id):
-        return
-    if _user_active_since(user_id, start_ts + 1800):  # после step2
-        logger.info(f"Onboarding step3 skipped — user {user_id} active")
-        return
-
-    profile = get_profile(user_id)
-    history = get_ai_history(user_id)
-
-    text = await _generate_onboarding_step(3, lang, interest, profile, history)
-    if not text:
-        text = _STEP3_FALLBACK.get(lang, _STEP3_FALLBACK["en"]).get(interest, "")
-    if not text:
-        return
-
-    try:
-        await context.bot.send_chat_action(chat_id=chat_id, action="typing")
-        await asyncio.sleep(2.0)
-        await context.bot.send_message(
-            chat_id=chat_id, text=text, parse_mode=ParseMode.MARKDOWN)
-        add_ai_message(user_id, "assistant", text)
-        mark_push_sent(user_id)
-        logger.info(f"Onboarding step3 → {user_id}")
-    except TelegramError as e:
-        logger.warning(f"Onboarding step3 failed [{user_id}]: {e}")
-
-
-async def onboarding_step4_job(context) -> None:
-    """T+6h: финальный urgency push."""
-    d        = context.job.data
-    user_id  = d["user_id"]
-    chat_id  = d["chat_id"]
-    lang     = d["lang"]
-    interest = d["interest"]
-    start_ts = d["start_ts"]
-
-    if _user_ftd_done(user_id):
-        return
-    if _user_active_since(user_id, start_ts + 7200):  # после step3
-        logger.info(f"Onboarding step4 skipped — user {user_id} active")
-        return
-
-    profile = get_profile(user_id)
-    history = get_ai_history(user_id)
-
-    text = await _generate_onboarding_step(4, lang, interest, profile, history)
-    if not text:
-        text = _STEP4_FALLBACK.get(lang, _STEP4_FALLBACK["en"]).get(interest, "")
-    if not text:
-        return
-
-    try:
-        await context.bot.send_chat_action(chat_id=chat_id, action="typing")
-        await asyncio.sleep(2.0)
-        await context.bot.send_message(
-            chat_id=chat_id, text=text, parse_mode=ParseMode.MARKDOWN)
-        add_ai_message(user_id, "assistant", text)
-        mark_push_sent(user_id)
-        logger.info(f"Onboarding step4 → {user_id}")
-    except TelegramError as e:
-        logger.warning(f"Onboarding step4 failed [{user_id}]: {e}")
-
-
-# ════════════════════════════════════════════════════════════════════════════
-#  PUBLIC: schedule_onboarding — вызывается из bot.py после user_joined
-# ════════════════════════════════════════════════════════════════════════════
-
-def schedule_onboarding(
-    job_queue,
-    user_id: int,
-    chat_id: int,
-    lang: str,
-    interest: str,
-) -> None:
-    """
-    Ставит в очередь 4 шага онбординга.
-    Вызывать ПОСЛЕ того как подписка подтверждена.
-    """
-    start_ts = datetime.now(timezone.utc).timestamp()
-    base_data = {
-        "user_id":  user_id,
-        "chat_id":  chat_id,
-        "lang":     lang,
-        "interest": interest,
-        "start_ts": start_ts,
-    }
-
-    # T+90s  — breakdown бонуса/стратегии
-    job_queue.run_once(
-        onboarding_step1_job,
-        when=90,
-        data=base_data,
-        name=f"ob1_{user_id}",
-    )
-    # T+30min — urgency первого шага
-    job_queue.run_once(
-        onboarding_step2_job,
-        when=30 * 60,
-        data=base_data,
-        name=f"ob2_{user_id}",
-    )
-    # T+2h — follow-up
-    job_queue.run_once(
-        onboarding_step3_job,
-        when=2 * 3600,
-        data=base_data,
-        name=f"ob3_{user_id}",
-    )
-    # T+6h — финальный push
-    job_queue.run_once(
-        onboarding_step4_job,
-        when=6 * 3600,
-        data=base_data,
-        name=f"ob4_{user_id}",
-    )
-
-    logger.info(f"Onboarding scheduled for user {user_id} [{lang}/{interest}]")
-
-
-# ════════════════════════════════════════════════════════════════════════════
-#  FTD detector — определяет по тексту что юзер сделал депозит
-# ════════════════════════════════════════════════════════════════════════════
-
-_FTD_SIGNALS: list[str] = [
-    # EN
-    "deposited", "made a deposit", "put in", "funded", "added funds",
-    "registered", "signed up", "joined", "i'm in", "did it", "done it",
-    "placed a bet", "placed my first", "first bet", "first deposit",
-    # ES
-    "depositado", "hice un depósito", "me registré", "me apunté", "ya estoy",
-    "puse dinero", "aposté", "primera apuesta", "primer depósito",
-    # HR
-    "uplatio", "napravio depozit", "registrirao", "pridružio", "kladio",
-    "prvi ulog", "prva uplata",
-    # LT
-    "įnešiau", "užsiregistravau", "prisijungiau", "pastatiau",
-    "pirmas statymas", "pirmas depozitas",
-    # LV
-    "iemaksāju", "reģistrējos", "pievienojos", "likumu",
-    "pirmā likme", "pirmais depozīts",
+# ── FTD detector ──────────────────────────────────────────────────────────────
+_FTD_KW = [
+    "deposited","made a deposit","put in","funded","added funds","registered",
+    "signed up","i'm in","did it","placed a bet","first bet","first deposit",
+    "just put","just deposited","just signed","i went in","went ahead","completed",
+    "depositado","hice un depósito","me registré","me apunté","ya estoy","puse dinero",
+    "aposté","primera apuesta","primer depósito","lo hice","me metí","entré",
+    "uplatio","napravio depozit","registrirao","pridružio","prvi ulog","napravio sam",
+    "įnešiau","užsiregistravau","prisijungiau","pastatiau","pirmas statymas","padariau",
+    "iemaksāju","reģistrējos","pievienojos","pirmā likme","izdarīju",
 ]
 
 def detect_ftd_signal(text: str) -> bool:
-    """Определяет по тексту что пользователь сделал депозит/зарегистрировался."""
     lower = text.lower()
-    return any(signal in lower for signal in _FTD_SIGNALS)
+    return any(kw in lower for kw in _FTD_KW)
+
+async def detect_ftd_ai(user_text: str, history: list, lang: str) -> bool:
+    if detect_ftd_signal(user_text): return True
+    if len(user_text) > 60 or "?" in user_text: return False
+    if not ANTHROPIC_KEY: return False
+    try:
+        recent = [m for m in history[-4:] if m.get("role")=="user"]
+        if not recent: return False
+        data = await _post_with_retry(ANTHROPIC_URL,
+            {"model":MODEL,"max_tokens":5,"system":"Did the user confirm making a deposit or registering? Reply YES or NO only.",
+             "messages":[{"role":"user","content":f"Message: {user_text}\nContext: {'; '.join(m['content'] for m in recent[-2:])}"}]},
+            {"x-api-key":ANTHROPIC_KEY,"anthropic-version":"2023-06-01","content-type":"application/json"},
+            timeout=8,max_retries=1)
+        answer = next((b["text"].strip().upper() for b in data.get("content",[]) if b.get("type")=="text"),"NO")
+        return answer.startswith("YES")
+    except Exception: return False
+
+# ── Base AI generator ─────────────────────────────────────────────────────────
+def _base_system(lang,interest,psychotype,user_profile,objections,extra="") -> str:
+    lang_names={"en":"English","es":"Spanish (Spain, tú)","hr":"Croatian","lt":"Lithuanian","lv":"Latvian"}
+    language=lang_names.get(lang,"English")
+    ic={"betting":"sports betting, value bets, line movements","casino":"casino bonuses, wagering math, RTP, cashback","nodeposit":"no-deposit bonuses, zero-risk first step","exclusive":"arbitrage, value bets, bonus EV"}.get(interest,"betting & bonuses")
+    pi={"cynic":"Only verifiable facts. No claims.","skeptic":"Specific numbers, social proof.","passive":"One tiny step. No pressure.","curious":"Real depth, insight. Pull toward action.","neutral":"Hook → gap → first move."}.get(psychotype,"Direct and useful.")
+    return f"""You are Valeria — private AI companion for betting and bonuses.
+User is SUBSCRIBED. Goal: deposit → repeat deposits.
+LANGUAGE: {language} ONLY.
+INTEREST: {ic}
+PSYCHOTYPE: {pi}
+{_build_obj_summary(objections)}
+{_build_profile_ctx(user_profile)}
+{extra}
+RULES: Never mention AI. Never promise profits. Never invent specific data without real source.
+Max 4 sentences. *bold* 1-2 key concepts. 1 emoji max. End with question OR next step."""
+
+async def _generate(system,user_content="Write the message.",history=None,max_tokens=280,timeout=20) -> Optional[str]:
+    if not ANTHROPIC_KEY: return None
+    messages = list(_sanitize_history(history[-6:])) if history else []
+    messages.append({"role":"user","content":user_content})
+    try:
+        data = await _post_with_retry(ANTHROPIC_URL,
+            {"model":MODEL,"max_tokens":max_tokens,"system":system,"messages":messages},
+            {"x-api-key":ANTHROPIC_KEY,"anthropic-version":"2023-06-01","content-type":"application/json"},
+            timeout=timeout)
+        text = next((b["text"].strip() for b in data.get("content",[]) if b.get("type")=="text"),"")
+        if text and len(text)>15:
+            return re.sub(r'\*\*(.+?)\*\*',r'*\1*',text)
+    except Exception as e: logger.error(f"_generate: {e}")
+    return None
+
+# ── Fallbacks ─────────────────────────────────────────────────────────────────
+_FB = {
+    "step1":{
+        "en":{"betting":"The channel posts before lines move — the window is *15–45 minutes*. Most people catch it after it closes. Do you follow specific leagues or just look for what moves?","casino":"Most people lose on 'good' bonuses because they skip the math. ×8 wagering on €50 = €400 to play — at 96% RTP that's *€16 expected cost*. What's your usual game type?","nodeposit":"No-deposit is pure upside: zero risk, real potential. The channel tracks which ones have the best terms right now. Have you tried one before?","exclusive":"Two edges compound better than one — value bets for ROI, bonus EV for free money. Most people use only one. What's your stronger side?"},
+        "es":{"betting":"El canal publica antes de que las cuotas se muevan — la ventana es *15–45 minutos*. La mayoría lo capta después. ¿Sigues ligas específicas o buscas lo que se mueve?","casino":"La mayoría pierde con bonos 'buenos' por no hacer las cuentas. ×8 wagering sobre €50 = €400 a jugar — al 96% RTP son *€16 de coste esperado*. ¿Qué tipo de juego prefieres?","nodeposit":"Sin depósito es puro upside: riesgo cero, potencial real. El canal rastrea cuáles tienen las mejores condiciones. ¿Has probado alguno antes?","exclusive":"Dos edges se componen mejor que uno — value bets para ROI, EV de bonos para dinero gratis. La mayoría usa solo uno. ¿Cuál es tu lado más fuerte?"},
+        "hr":{"betting":"Kanal objavljuje prije nego se kvote pomaknu — prozor je *15–45 minuta*. Većina hvata to nakon što se zatvori. Pratiš li specifične lige ili tražiš što se kreće?","casino":"Većina gubi na 'dobrim' bonusima jer preskoče matematiku. ×8 wagering na €50 = €400 za proigravanje — pri 96% RTP to je *€16 očekivanog troška*. Koji tip igre preferiraš?","nodeposit":"Bez depozita je čisti upside: nula rizika, pravi potencijal. Kanal prati koji imaju najbolje uvjete. Jesi li ikad probao?","exclusive":"Dva edgea se komponiraju bolje od jednog — value beti za ROI, bonus EV za besplatan novac. Većina koristi samo jedan. Koja je tvoja jača strana?"},
+        "lt":{"betting":"Kanalas skelbia prieš koeficientams judant — langas yra *15–45 min*. Dauguma gauna signalą po to. Seki specifines lygas ar ieškai visko kas juda?","casino":"Dauguma pralaimi prie gerų bonusų nes praleido matematiką. ×8 wagering nuo €50 = €400 sužaisti — 96% RTP tai *€16 tikėtinų išlaidų*. Kokio tipo žaidimus mėgsti?","nodeposit":"Be depozito yra grynas pranašumas: nulinė rizika, realus potencialas. Kanalas seka kurie turi geriausias sąlygas. Ar anksčiau bandei?","exclusive":"Du pranašumai kaupinasi geriau nei vienas. Dauguma naudoja tik vieną. Kuri tavo stipresnė pusė?"},
+        "lv":{"betting":"Kanāls publicē pirms koeficienti kustas — logs ir *15–45 min*. Vairākums nosauc pēc aizvēršanas. Vai seko konkrētām līgām vai meklē visu kas kustas?","casino":"Vairākums zaudē pie labiem bonusiem jo izlaiž matemātiku. ×8 wagering no €50 = €400 nospēlēt — 96% RTP *€16 paredzamo izmaksu*. Kāda veida spēles tev patīk?","nodeposit":"Bez depozīta ir tīrs augšupvērsts: nulles risks, reāls potenciāls. Kanāls seko kuriem labākie nosacījumi. Vai iepriekš mēģināji?","exclusive":"Divi pranašumai summējas labāk nekā viens. Vairākums izmanto tikai vienu. Kura tev stiprākā puse?"},
+    },
+    "barrier":{
+        "no_money":{
+            "en":"No bankroll needed — the channel covers no-deposit promos where you get access *with zero of your own money*. That's the zero-risk entry. Want me to walk you through it?",
+            "es":"No necesitas bankroll — el canal cubre promos sin depósito donde entras *con cero de tu propio dinero*. Esa es la entrada sin riesgo. ¿Quieres que te lo explique?",
+            "hr":"Ne trebaš bankroll — kanal pokriva promos bez depozita gdje ulaziš *s nula svog novca*. To je ulaz bez rizika. Hoćeš da ti objasnim?",
+            "lt":"Bankolis nereikalingas — kanalas apima be depozito akcijas kur įeini *su nuliniu savo pinigų*. Tai nulinės rizikos įėjimas. Nori paaiškinsiu?",
+            "lv":"Bankrols nav vajadzīgs — kanāls apklāj bez depozīta promo kur ienāc *ar nulli savu naudas*. Tā ir nulles riska ieeja. Gribi izskaidrošu?",
+        },
+        "no_trust":{
+            "en":"Fair — check the last 30 days of channel posts against actual results. *That's public data you can verify yourself.* What specifically feels off to you?",
+            "es":"Justo — comprueba los últimos 30 días de posts del canal contra los resultados reales. *Son datos públicos que puedes verificar tú mismo.* ¿Qué exactamente te genera desconfianza?",
+            "hr":"Pošteno — provjeri zadnjih 30 dana postova kanala nasuprot stvarnih rezultata. *To su javni podaci koje možeš sam provjeriti.* Što točno ti se čini sumnjivim?",
+            "lt":"Sąžiningai — patikrink paskutines 30 dienų kanalo pranešimus prieš realius rezultatus. *Tai vieši duomenys kuriuos gali pats patikrinti.* Kas konkrečiai atrodo įtartina?",
+            "lv":"Godīgi — pārbaudi pēdējo 30 dienu kanāla ziņojumus pret reāliem rezultātiem. *Tie ir publiski dati kurus vari pats pārbaudīt.* Kas konkrēti šķiet aizdomīgs?",
+        },
+        "dont_understand":{
+            "en":"Let me make it one sentence: channel posts a recommendation → you act on it → you track the result. *Which step is unclear?*",
+            "es":"Lo dejo en una frase: el canal publica una recomendación → tú actúas → rastrear el resultado. *¿Qué paso no está claro?*",
+            "hr":"Stavljam u jednu rečenicu: kanal objavljuje preporuku → ti djeluješ → pratiš rezultat. *Koji korak nije jasan?*",
+            "lt":"Vienu sakiniu: kanalas paskelbia rekomendaciją → tu veiksni → seki rezultatą. *Kuris žingsnis neaiškus?*",
+            "lv":"Vienā teikumā: kanāls publicē ieteikumu → tu rīkojies → seko rezultātam. *Kurš solis nav skaidrs?*",
+        },
+        "not_urgent":{
+            "en":"No rush — just know the gap closes when the market corrects. *Usually within hours.* When are you planning to look?",
+            "es":"Sin prisa — solo ten en cuenta que el gap se cierra cuando el mercado corrige. *Normalmente en horas.* ¿Cuándo planeas mirar?",
+            "hr":"Nema žurbe — samo znaj da se jaz zatvara kad se tržište ispravi. *Obično u satima.* Kad planiraš pogledati?",
+            "lt":"Neskubėk — tik žinok kad tarpas užsidaro kai rinka pasikoreguoja. *Paprastai per valandas.* Kada planuoji pažiūrėti?",
+            "lv":"Nav steiga — tikai zini ka tarpas aizveras kad tirgus koriģē. *Parasti stundu laikā.* Kad plāno paskatīties?",
+        },
+        "already_elsewhere":{
+            "en":"That's useful — multiple accounts means access to more signals and more bonus opportunities. *What platform are you currently on?*",
+            "es":"Es útil — múltiples cuentas significa acceso a más señales y más oportunidades de bonos. *¿En qué plataforma estás actualmente?*",
+            "hr":"To je korisno — više računa znači pristup više signala i više bonus mogućnosti. *Na kojoj platformi si trenutno?*",
+            "lt":"Tai naudinga — kelios sąskaitos reiškia prieigą prie daugiau signalų ir bonusų galimybių. *Kokioje platformoje esi dabar?*",
+            "lv":"Tas ir noderīgi — vairāki konti nozīmē piekļuvi vairāk signāliem un bonusu iespējām. *Kurā platformā esi pašlaik?*",
+        },
+        "thinking":{
+            "en":"Take your time. *What's the one thing you're still not sure about?* Sometimes it's smaller than people think.",
+            "es":"Tómate tu tiempo. *¿Cuál es la única cosa de la que aún no estás seguro?* A veces es más pequeña de lo que la gente piensa.",
+            "hr":"Uzmi si vremena. *Što je ta jedina stvar o kojoj još nisi siguran?* Ponekad je manja nego što ljudi misle.",
+            "lt":"Imk savo laiką. *Kas yra tas vienas dalykas kuriuo dar neesi tikras?* Kartais jis mažesnis nei žmonės galvoja.",
+            "lv":"Ņem savu laiku. *Kas ir tas viens lieta par ko vēl neesi pārliecināts?* Dažreiz tas ir mazāks nekā cilvēki domā.",
+        },
+        "unknown":{
+            "en":"What's the one thing that would make the first step feel obvious? *Honest question — I want to actually help.*",
+            "es":"¿Cuál es la única cosa que haría que el primer paso pareciera obvio? *Pregunta honesta — quiero ayudar de verdad.*",
+            "hr":"Što je ta jedna stvar koja bi učinila da prvi korak izgleda očito? *Iskreno pitanje — zaista želim pomoći.*",
+            "lt":"Kas yra tas vienas dalykas dėl kurio pirmas žingsnis atrodytų akivaizdžiai? *Sąžiningas klausimas — tikrai noriu padėti.*",
+            "lv":"Kas ir tas viens lietas kas liktu pirmajam solim izskatīties acīmredzamam? *Godīgs jautājums — gribu tiešām palīdzēt.*",
+        },
+    },
+    "step3":{
+        "en":"Someone in a similar spot last week — same hesitation — finally moved. *What they told me after: 'I overthought it.'* What's still holding you back?",
+        "es":"Alguien en una situación similar la semana pasada — la misma duda — finalmente se movió. *Lo que me dijeron después: 'Le di demasiadas vueltas.'* ¿Qué te sigue frenando?",
+        "hr":"Netko u sličnoj situaciji prošlog tjedna — ista oklijevanje — konačno se pomaknuo. *Što su mi rekli nakon: 'Previše sam razmišljao.'* Što te još drži?",
+        "lt":"Kažkas panašioje situacijoje praeitą savaitę — tas pats svyravimas — galiausiai pajudėjo. *Ką jie man pasakė po: 'Per daug galvojau.'* Kas dar tave laiko?",
+        "lv":"Kāds līdzīgā situācijā pagājušajā nedēļā — tāda pati vilcināšanās — beidzot pārvietojās. *Ko viņi man teica pēc: 'Es par daudz pārdomāju.'* Kas tev joprojām kavē?",
+    },
+    "step4":{
+        "en":"Last thing I'll say without you reaching out first — the conditions that are open right now *close by end of week*. I'll still be here after, but it'll look different. Your call. 🎯",
+        "es":"Lo último que digo sin que tú contactes primero — las condiciones abiertas ahora *se cierran antes del fin de semana*. Seguiré aquí después, pero será diferente. Tú decides. 🎯",
+        "hr":"Zadnje što govorim bez da ti kontaktiraš — uvjeti otvoreni sada *zatvaraju se do kraja tjedna*. Bit ću ovdje i poslije, ali bit će drugačije. Tvoj izbor. 🎯",
+        "lt":"Paskutinis dalykas kurį sakau be tavo iniciatyvos — sąlygos atidarytos dabar *užsidaro iki savaitės pabaigos*. Vis dar būsiu čia po to, bet bus kitaip. Tavo pasirinkimas. 🎯",
+        "lv":"Pēdējā lieta ko saku bez tavas iniciatīvas — nosacījumi atvērti tagad *aizveras līdz nedēļas beigām*. Joprojām būšu šeit pēc tam, bet būs citādāk. Tavs lēmums. 🎯",
+    },
+    "step5":{
+        "en":{"betting":"Different angle — *have you been watching any of the signals just to see how they play out?* Even without acting, the pattern becomes obvious quickly.","casino":"New offer just landed with *×6 wagering* — cleanest terms this month. Thought of you.","nodeposit":"Something dropped — *no deposit, ×8 wagering, expires Sunday*. Cleanest in weeks.","exclusive":"*4 value gaps this week*, each closed within 2 hours. Pattern is consistent. Still watching?"},
+        "es":{"betting":"Ángulo diferente — *¿has seguido alguna señal solo para ver cómo se desarrolla?* Incluso sin actuar, el patrón se vuelve obvio rápido.","casino":"Nueva oferta con *×6 wagering* — los mejores términos de este mes. Me acordé de ti.","nodeposit":"Algo cayó — *sin depósito, ×8 wagering, vence el domingo*. Los mejores en semanas.","exclusive":"*4 gaps de valor esta semana*, cada uno cerrado en 2 horas. El patrón es consistente. ¿Sigues mirando?"},
+        "hr":{"betting":"Drugačiji kut — *pratiš li neke signale samo da vidiš kako se razvijaju?* Čak i bez djelovanja, obrazac brzo postaje očit.","casino":"Nova ponuda s *×6 wageringom* — najčišći uvjeti ovog mjeseca. Sjetio sam se tebe.","nodeposit":"Nešto palo — *bez depozita, ×8 wagering, ističe u nedjelju*. Najčišći u tjednima.","exclusive":"*4 value gapa ovog tjedna*, svaki zatvoren unutar 2 sata. Obrazac je konzistentan. Još gledaš?"},
+        "lt":{"betting":"Kitoks kampas — *ar seki kokius nors signalus tiesiog stebėti kaip jie atsiskleidžia?* Net neveikiant modelis greitai tampa akivaizdus.","casino":"Naujas pasiūlymas su *×6 wagering* — geriausios sąlygos šį mėnesį. Pagalvojau apie tave.","nodeposit":"Kažkas nukrito — *be depozito, ×8 wagering, baigiasi sekmadienį*. Geriausias savaitėmis.","exclusive":"*4 value tarpai šią savaitę*, kiekvienas užsidarė per 2 valandas. Modelis nuoseklus. Vis dar stebi?"},
+        "lv":{"betting":"Cits leņķis — *vai seko kādiem signāliem tikai lai redzētu kā tie attīstās?* Pat nerīkojoties modelis kļūst acīmredzams ātri.","casino":"Jauns piedāvājums ar *×6 wagering* — tīrākie nosacījumi šomēnes. Padomāju par tevi.","nodeposit":"Kaut kas nokrita — *bez depozīta, ×8 wagering, beidzas svētdienā*. Tīrākie nedēļās.","exclusive":"*4 value tarpi šonedēļ*, katrs aizvērās 2 stundu laikā. Modelis konsekvents. Vēl skaties?"},
+    },
+    "step6":{
+        "en":"Before I shift to just sharing market updates — *is there anything I could say or show that would make the first step feel obvious?* Genuine question.",
+        "es":"Antes de pasar solo a compartir actualizaciones del mercado — *¿hay algo que pudiera decir o mostrar que haría que el primer paso pareciera obvio?* Pregunta genuina.",
+        "hr":"Prije nego prijeđem samo na dijeljenje tržišnih ažuriranja — *ima li nešto što bih mogao reći ili pokazati što bi učinilo da prvi korak izgleda očit?* Iskreno pitanje.",
+        "lt":"Prieš pereidamas prie tik rinkos atnaujinimų — *ar yra kažkas ką galėčiau pasakyti ar parodyti kas priverstų pirmą žingsnį atrodyti akivaizdžiai?* Nuoširdus klausimas.",
+        "lv":"Pirms pāriešu tikai uz tirgus atjauninājumu dalīšanos — *vai ir kaut kas ko varētu teikt vai parādīt kas liktu pirmajam solim izskatīties acīmredzamam?* Patiess jautājums.",
+    },
+    "celebration":{
+        "en":{"betting":"That's the move. 🎯 *Size bets at 1–3% of bankroll per bet* — the edge compounds over time, not in one hit. What's your bankroll sitting at?","casino":"Let's go. 💎 *Check your wagering progress tracker* in your account — low volatility slots clear fastest. Which platform did you go with?","nodeposit":"Perfect entry. 🎁 *Play lowest volatility slots* — they clear wagering most efficiently. How much did you get in the bonus?","exclusive":"Both sides activated. 🔥 *Start with betting signals* — lower variance edge. What's your first signal from the channel?"},
+        "es":{"betting":"Ese es el movimiento. 🎯 *Apuesta 1–3% del bankroll por apuesta* — el edge se compone con el tiempo. ¿Cuánto tienes en el bankroll?","casino":"Vamos. 💎 *Revisa el tracker de progreso de wagering* — los slots de baja volatilidad liberan más rápido. ¿Con qué plataforma fuiste?","nodeposit":"Entrada perfecta. 🎁 *Juega slots de menor volatilidad* — liberan el wagering más eficientemente. ¿Cuánto obtuviste en el bono?","exclusive":"Ambos lados activados. 🔥 *Empieza con las señales de apuestas* — menor varianza. ¿Cuál es tu primera señal del canal?"},
+        "hr":{"betting":"To je potez. 🎯 *Kladi 1–3% bankrolla po okladi* — edge se komponira s vremenom. Koliko ti bankroll iznosi?","casino":"Idemo. 💎 *Provjeri tracker napretka wageringa* — slotovi niske volatilnosti najbrže oslobađaju. Koju platformu si odabrao?","nodeposit":"Savršen ulaz. 🎁 *Igraj slotove najniže volatilnosti* — najučinkovitije oslobađaju wagering. Koliko si dobio u bonusu?","exclusive":"Obje strane aktivirane. 🔥 *Počni sa signalima klađenja* — niža varijanca. Koji je tvoj prvi signal iz kanala?"},
+        "lt":{"betting":"Tai judėjimas. 🎯 *Statyk 1–3% bankolio vienam betui* — pranašumas kaupiasi laikui bėgant. Koks tavo bankolis?","casino":"Eime. 💎 *Patikrink wagering pažangos stebyklą* — mažo nepastovumo slotai greičiausiai išvalo. Kokią platformą pasirinkote?","nodeposit":"Puikus įėjimas. 🎁 *Žaisk mažiausio nepastovumo slotus* — efektyviausiai išvalo wagering. Kiek gavai bonuse?","exclusive":"Abi pusės aktyvuotos. 🔥 *Pradėk nuo lažybų signalų* — mažesnė dispersija. Koks tavo pirmas signalas iš kanalo?"},
+        "lv":{"betting":"Tas ir gājiens. 🎯 *Liec 1–3% bankrola par likmi* — priekšrocība uzkrājas laika gaitā. Cik liels tavs bankrols?","casino":"Ejam. 💎 *Pārbaudi wagering progresa izsekotāju* — zemas nepastāvības sloti ātrāk notīra. Kuru platformu izvēlējies?","nodeposit":"Nevainojama ieeja. 🎁 *Spēlē zemākās nepastāvības slotus* — visefektīvāk notīra wagering. Cik saņēmi bonusā?","exclusive":"Abas puses aktivizētas. 🔥 *Sāc ar likmju signāliem* — zemāka dispersija. Kāds ir tavs pirmais signāls no kanāla?"},
+    },
+    "repeat":{
+        "r1h":{"en":"How's the first session? *Don't close out early if in profit* — wagering clears faster when you're not chasing.","es":"¿Cómo va la primera sesión? *No cierres pronto si estás en positivo* — el wagering se libera más rápido cuando no persigues.","hr":"Kako ide prva sesija? *Ne zatvaraj rano ako si u plusu* — wagering se oslobađa brže kad ne juriš.","lt":"Kaip pirmoji sesija? *Neuždaryk anksti jei esi pliuse* — wagering išvalomas greičiau kai nesivyji.","lv":"Kā iet pirmā sesija? *Neaizver agri ja esi plusā* — wagering notīrās ātrāk kad nevajā."},
+        "r6h":{"en":"Next move: *check your promotions tab* — reload bonus often appears in the first 24–48h. Usually a match offer. Found anything?","es":"Siguiente movimiento: *revisa tu pestaña de promociones* — el bono de recarga suele aparecer en las primeras 24–48h. ¿Encontraste algo?","hr":"Sljedeći potez: *provjeri karticu promocija* — reload bonus često se pojavljuje u prvih 24–48h. Pronašao si nešto?","lt":"Kitas žingsnis: *patikrink akcijų skirtuką* — reload bonusas dažnai atsiranda per pirmąsias 24–48 val. Radai ką nors?","lv":"Nākamais gājiens: *pārbaudi akciju cilni* — reload bonuss bieži parādās pirmajās 24–48h. Atradi kaut ko?"},
+        "r24h":{"en":"How did it land? *First result doesn't define the edge* — the pattern over 20+ bets does. What was the outcome?","es":"¿Cómo fue? *El primer resultado no define el edge* — el patrón en 20+ apuestas sí. ¿Cuál fue el resultado?","hr":"Kako je palo? *Prvi rezultat ne definira edge* — obrazac u 20+ oklada da. Kakav je bio ishod?","lt":"Kaip sekėsi? *Pirmas rezultatas neapibrėžia pranašumo* — modelis per 20+ statymų apibrėžia. Koks buvo rezultatas?","lv":"Kā nokrita? *Pirmais rezultāts nenosaka priekšrocību* — modelis 20+ likmēs nosaka. Kāds bija rezultāts?"},
+        "r3d":{"en":"Ready for round two? *The second deposit bonus is usually the best value* — platforms are most generous before they know your pattern. What's your reload situation?","es":"¿Listo para la ronda dos? *El bono del segundo depósito suele ser el mejor valor* — las plataformas son más generosas antes de conocer tu patrón. ¿Cuál es tu situación de recarga?","hr":"Spreman za rundu dva? *Bonus za drugi depozit je obično najbolja vrijednost* — platforme su najdarežljivije prije nego znaju tvoj obrazac. Kakva je tvoja situacija s nadopunom?","lt":"Pasiruošęs antrajam ratui? *Antrojo depozito bonusas paprastai geriausias* — platformos dosnesnės kol nežino tavo modelio. Kokia tavo reload situacija?","lv":"Gatavs otrajai kārtai? *Otrā depozīta bonuss parasti ir labākā vērtība* — platformas щedras pirms zina tavu modeli. Kāda ir tava reload situācija?"},
+        "r7d":{"en":"Week in — you have real data now. *What's your P&L looking like?* I can help optimize the next move based on what's actually working.","es":"Una semana — tienes datos reales ahora. *¿Cómo está tu P&L?* Puedo ayudar a optimizar el siguiente movimiento basándome en lo que realmente funciona.","hr":"Tjedan unutra — imaš prave podatke sada. *Kako izgleda tvoj P&L?* Mogu pomoći optimizirati sljedeći potez na osnovu onoga što zaista funkcionira.","lt":"Savaitė viduje — dabar turi realius duomenis. *Kaip atrodo tavo P&L?* Galiu padėti optimizuoti kitą žingsnį pagal tai kas tikrai veikia.","lv":"Nedēļa iekšā — tagad tev ir reāli dati. *Kā izskatās tavs P&L?* Varu palīdzēt optimizēt nākamo gājienu balstoties uz to kas tiešām darbojas."},
+    },
+}
+
+def _fb(key, lang, interest=None, barrier=None):
+    d = _FB.get(key,{})
+    if key == "step1":
+        return d.get(lang,d.get("en",{})).get(interest,"")
+    if key == "barrier":
+        bd = d.get(barrier,"unknown"); return bd.get(lang,bd.get("en",""))
+    if key == "step5":
+        return d.get(lang,d.get("en",{})).get(interest,"")
+    if key == "celebration":
+        return d.get(lang,d.get("en",{})).get(interest,"")
+    if key == "repeat":
+        rd = d.get(barrier or "r1h",{}); return rd.get(lang,rd.get("en",""))
+    return d.get(lang,d.get("en",""))
+
+# ── Step generators ───────────────────────────────────────────────────────────
+async def generate_step1(lang,interest,psychotype,user_profile,history,objections) -> str:
+    extra="STEP 1: Break down HOW the channel benefits them. Real math. End with ONE personal question."
+    return await _generate(_base_system(lang,interest,psychotype,user_profile,objections,extra),history=history) or _fb("step1",lang,interest)
+
+async def generate_step2(lang,interest,psychotype,user_profile,history,objections,barrier) -> str:
+    extra=f"STEP 2: Address barrier '{barrier}'. Meet them where they are. No high pressure."
+    return await _generate(_base_system(lang,interest,psychotype,user_profile,objections,extra),history=history) or _fb("barrier",lang,interest,barrier)
+
+async def generate_step3(lang,interest,psychotype,user_profile,history,objections,barrier) -> str:
+    extra=f"STEP 3: Social proof for barrier '{barrier}'. Specific relatable story. End with question."
+    return await _generate(_base_system(lang,interest,psychotype,user_profile,objections,extra),history=history) or _fb("step3",lang)
+
+async def generate_step4(lang,interest,psychotype,user_profile,history,objections,barrier) -> str:
+    extra="STEP 4: Final push. Specific deadline. Respectful. Leave door open."
+    return await _generate(_base_system(lang,interest,psychotype,user_profile,objections,extra),history=history) or _fb("step4",lang)
+
+async def generate_step5(lang,interest,psychotype,user_profile,history,objections,barrier) -> str:
+    extra="STEP 5: Fresh angle, 24h later. Don't repeat previous arguments. New hook."
+    return await _generate(_base_system(lang,interest,psychotype,user_profile,objections,extra),history=history) or _fb("step5",lang,interest)
+
+async def generate_step6(lang,interest,psychotype,user_profile,history,objections,barrier) -> str:
+    extra="STEP 6: Before switching to maintenance mode. Ask what would make first step feel obvious."
+    return await _generate(_base_system(lang,interest,psychotype,user_profile,objections,extra),history=history) or _fb("step6",lang)
+
+async def generate_ftd_celebration(lang,interest,psychotype,user_profile,history) -> str:
+    extra="FTD CELEBRATION: 1 sentence celebration, then immediately pivot to concrete next step. Ask about their specific situation."
+    return await _generate(_base_system(lang,interest,psychotype,user_profile,{},extra),history=history) or _fb("celebration",lang,interest)
+
+async def generate_repeat_push(step,lang,interest,psychotype,user_profile,history,ftd_count) -> str:
+    extra=f"REPEAT FTD step={step}, ftd_count={ftd_count}. Practical advice for active user. Ask about real results."
+    return await _generate(_base_system(lang,interest,psychotype,user_profile,{},extra),history=history) or _fb("repeat",lang,interest,step)
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+def _user_active_since(user_id,since_ts):
+    user=get_user(user_id); last_str=user.get("last_active","")
+    if not last_str: return False
+    try:
+        la=datetime.fromisoformat(last_str)
+        if la.tzinfo is None: la=la.replace(tzinfo=timezone.utc)
+        return la.timestamp()>since_ts
+    except Exception: return False
+
+def _user_ftd_done(user_id): return bool(get_user(user_id).get("ftd_done"))
+def _get_ftd_count(user_id): return get_user(user_id).get("ftd_count",0)
+
+async def _get_ctx(user_id):
+    return get_profile(user_id),get_ai_history(user_id),get_psychotype(user_id),get_objections(user_id)
+
+async def _send(context,user_id,chat_id,text) -> bool:
+    if not text: return False
+    try:
+        await context.bot.send_chat_action(chat_id=chat_id,action="typing")
+        await asyncio.sleep(2.0)
+        await context.bot.send_message(chat_id=chat_id,text=text,parse_mode=ParseMode.MARKDOWN)
+        add_ai_message(user_id,"assistant",text); mark_push_sent(user_id); return True
+    except TelegramError as e: logger.warning(f"Onboarding send [{user_id}]: {e}"); return False
+
+# ── Job functions ─────────────────────────────────────────────────────────────
+async def onboarding_step1_job(context):
+    d=context.job.data; user_id,chat_id=d["user_id"],d["chat_id"]
+    lang,interest=d["lang"],d["interest"]
+    if _user_ftd_done(user_id): return
+    profile,history,psychotype,objections=await _get_ctx(user_id)
+    text=await generate_step1(lang,interest,psychotype,profile,history,objections)
+    await _send(context,user_id,chat_id,text); logger.info(f"ob1 → {user_id}")
+
+async def onboarding_barrier_classify_job(context):
+    d=context.job.data; user_id=d["user_id"]
+    if _user_ftd_done(user_id): return
+    profile,history,psychotype,objections=await _get_ctx(user_id)
+    barrier=await classify_barrier(history,d["lang"],d["interest"],psychotype)
+    update_user(user_id,onboarding_barrier=barrier); logger.info(f"barrier → {user_id}: {barrier}")
+
+async def onboarding_step2_job(context):
+    d=context.job.data; user_id,chat_id=d["user_id"],d["chat_id"]
+    lang,interest,start_ts=d["lang"],d["interest"],d["start_ts"]
+    if _user_ftd_done(user_id): return
+    if _user_active_since(user_id,start_ts+20*60): logger.info(f"ob2 skip active {user_id}"); return
+    profile,history,psychotype,objections=await _get_ctx(user_id)
+    barrier=get_user(user_id).get("onboarding_barrier","unknown")
+    text=await generate_step2(lang,interest,psychotype,profile,history,objections,barrier)
+    await _send(context,user_id,chat_id,text); logger.info(f"ob2 [{barrier}] → {user_id}")
+
+async def onboarding_step3_job(context):
+    d=context.job.data; user_id,chat_id=d["user_id"],d["chat_id"]
+    lang,interest,start_ts=d["lang"],d["interest"],d["start_ts"]
+    if _user_ftd_done(user_id): return
+    if _user_active_since(user_id,start_ts+50*60): return
+    profile,history,psychotype,objections=await _get_ctx(user_id)
+    barrier=get_user(user_id).get("onboarding_barrier","unknown")
+    text=await generate_step3(lang,interest,psychotype,profile,history,objections,barrier)
+    await _send(context,user_id,chat_id,text); logger.info(f"ob3 [{barrier}] → {user_id}")
+
+async def onboarding_step4_job(context):
+    d=context.job.data; user_id,chat_id=d["user_id"],d["chat_id"]
+    lang,interest,start_ts=d["lang"],d["interest"],d["start_ts"]
+    if _user_ftd_done(user_id): return
+    if _user_active_since(user_id,start_ts+90*60): return
+    profile,history,psychotype,objections=await _get_ctx(user_id)
+    barrier=get_user(user_id).get("onboarding_barrier","unknown")
+    text=await generate_step4(lang,interest,psychotype,profile,history,objections,barrier)
+    await _send(context,user_id,chat_id,text); logger.info(f"ob4 [{barrier}] → {user_id}")
+
+async def onboarding_step5_job(context):
+    d=context.job.data; user_id,chat_id=d["user_id"],d["chat_id"]
+    lang,interest,start_ts=d["lang"],d["interest"],d["start_ts"]
+    if _user_ftd_done(user_id): return
+    if _user_active_since(user_id,start_ts+5*3600): return
+    profile,history,psychotype,objections=await _get_ctx(user_id)
+    barrier=await classify_barrier(history,lang,interest,psychotype)
+    update_user(user_id,onboarding_barrier=barrier)
+    text=await generate_step5(lang,interest,psychotype,profile,history,objections,barrier)
+    await _send(context,user_id,chat_id,text); logger.info(f"ob5 [{barrier}] → {user_id}")
+
+async def onboarding_step6_job(context):
+    d=context.job.data; user_id,chat_id=d["user_id"],d["chat_id"]
+    lang,interest,start_ts=d["lang"],d["interest"],d["start_ts"]
+    if _user_ftd_done(user_id): return
+    if _user_active_since(user_id,start_ts+22*3600): return
+    profile,history,psychotype,objections=await _get_ctx(user_id)
+    barrier=get_user(user_id).get("onboarding_barrier","unknown")
+    text=await generate_step6(lang,interest,psychotype,profile,history,objections,barrier)
+    await _send(context,user_id,chat_id,text); logger.info(f"ob6 [{barrier}] → {user_id}")
+
+async def ftd_celebration_job(context):
+    d=context.job.data; user_id,chat_id=d["user_id"],d["chat_id"]
+    lang,interest=d["lang"],d["interest"]
+    profile,history,psychotype,_=await _get_ctx(user_id)
+    text=await generate_ftd_celebration(lang,interest,psychotype,profile,history)
+    await _send(context,user_id,chat_id,text); logger.info(f"celebration → {user_id}")
+
+async def repeat_push_job(context):
+    d=context.job.data; user_id,chat_id=d["user_id"],d["chat_id"]
+    lang,interest,step=d["lang"],d["interest"],d["step"]
+    profile,history,psychotype,_=await _get_ctx(user_id)
+    text=await generate_repeat_push(step,lang,interest,psychotype,profile,history,_get_ftd_count(user_id))
+    await _send(context,user_id,chat_id,text); logger.info(f"repeat [{step}] → {user_id}")
+
+# ── PUBLIC API ────────────────────────────────────────────────────────────────
+def schedule_onboarding(job_queue,user_id,chat_id,lang,interest) -> None:
+    start_ts=datetime.now(timezone.utc).timestamp()
+    base={"user_id":user_id,"chat_id":chat_id,"lang":lang,"interest":interest,"start_ts":start_ts}
+    job_queue.run_once(onboarding_step1_job,            when=90,      data=base,name=f"ob1_{user_id}")
+    job_queue.run_once(onboarding_barrier_classify_job, when=15*60,   data=base,name=f"obc_{user_id}")
+    job_queue.run_once(onboarding_step2_job,            when=30*60,   data=base,name=f"ob2_{user_id}")
+    job_queue.run_once(onboarding_step3_job,            when=2*3600,  data=base,name=f"ob3_{user_id}")
+    job_queue.run_once(onboarding_step4_job,            when=6*3600,  data=base,name=f"ob4_{user_id}")
+    job_queue.run_once(onboarding_step5_job,            when=24*3600, data=base,name=f"ob5_{user_id}")
+    job_queue.run_once(onboarding_step6_job,            when=48*3600, data=base,name=f"ob6_{user_id}")
+    logger.info(f"Adaptive onboarding scheduled → {user_id} [{lang}/{interest}]")
+
+def schedule_ftd_flow(job_queue,user_id,chat_id,lang,interest) -> None:
+    base={"user_id":user_id,"chat_id":chat_id,"lang":lang,"interest":interest}
+    job_queue.run_once(ftd_celebration_job,when=5,data=base,name=f"cel_{user_id}")
+    for step,delay in [("r1h",3600),("r6h",6*3600),("r24h",24*3600),("r3d",3*86400),("r7d",7*86400)]:
+        job_queue.run_once(repeat_push_job,when=delay,data={**base,"step":step},name=f"rpt_{step}_{user_id}")
+    logger.info(f"FTD repeat flow scheduled → {user_id}")
