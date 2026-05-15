@@ -29,6 +29,16 @@ from membership import (check_membership, MemberStatus, resolve_channel, resolve
                         infer_geo_from_tg_lang, get_channel_link, get_channel_title,
                         GEO_QUIZ, fetch_channel_ids)
 from ftd_onboarding import schedule_onboarding, detect_ftd_signal
+from daily_signal import daily_signal_job
+from ab_test import (assign_variant, get_hook_text, track_event,
+                     get_ab_stats, format_ab_stats_message, VARIANT_C_SKIPS_HOOK)
+from bonus_calculator import (should_show_calculator, get_calculator_trigger_text,
+                               get_calc_intro, get_deposit_buttons, get_stake_buttons,
+                               format_casino_result, format_betting_result, parse_deposit_callback)
+from referral import (should_offer_referral, get_referral_offer_text,
+                       track_referral_offer, track_referral_click,
+                       get_referrer_from_start, get_thanks_text, is_positive_message)
+from adrenaline import adrenaline_check_job, get_odds_api_status
 import messages as M
 from config import ANTHROPIC_KEY
 
@@ -126,9 +136,17 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     tg_lang    = update.effective_user.language_code
     chat_id    = update.effective_chat.id
 
-    # Язык из tg_lang (уточним после GEO-квиза)
+    # Реферальный параметр
+    start_param = context.args[0] if context.args else ""
+    if start_param:
+        referrer_id = get_referrer_from_start(start_param)
+        if referrer_id and referrer_id != user_id:
+            track_referral_click(referrer_id)
+            logger.info(f"Referral: {user_id} from {referrer_id}")
+
     geo_hint = infer_geo_from_tg_lang(tg_lang) or "OTHER"
     lang     = resolve_lang(geo_hint, tg_lang)
+    variant  = assign_variant()
 
     update_user(user_id,
         state=State.LANG, funnel_stage="new",
@@ -138,67 +156,67 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reengage_1_sent=False, reengage_2_sent=False,
         ai_msg_count=0, stage_replies=0,
         commitment_sent=False, cta_replies=0,
-        fallback_count=0,
+        fallback_count=0, ab_variant=variant,
+        positive_msg_count=0,
     )
-    logger.info(f"START user={user_id} lang={lang} geo={geo_hint} tg_lang={tg_lang}")
+    logger.info(f"START user={user_id} lang={lang} geo={geo_hint} variant={variant}")
 
-    # HOOK текст всегда на английском (кнопки языков идут следом)
-    hook_text = (
-        "Hey.\n\n"
-        "Not sure if you got here by chance or by instinct — but your timing is good. 🎯\n\n"
-        "I'm *Valeria* — I spent 4 years tracking odds, bonuses and signals across European markets. "
-        "Built this bot so I can share what I find with more people at once.\n\n"
-        "I'm not selling anything. No subscriptions, no fees. "
-        "I just drop what I find into a channel — and people are already making the most of it.\n\n"
-        "Which language do you want to continue in?"
-    )
-
-    # Кнопки выбора языка
-    lang_kb = [[InlineKeyboardButton(lbl, callback_data=cb)] for lbl, cb in M.LANG_BUTTONS]
-    markup  = InlineKeyboardMarkup(lang_kb)
-
+    hook_text = get_hook_text(variant, lang)
+    lang_kb   = [[InlineKeyboardButton(lbl, callback_data=cb)] for lbl, cb in M.LANG_BUTTONS]
+    markup    = InlineKeyboardMarkup(lang_kb)
     await asyncio.sleep(0.8)
 
-    # Отправляем ОДНИМ постом: фото + caption + кнопки
-    sent = False
+    # Вариант C — сразу к QUIZ, без HOOK
+    if variant == "C" and VARIANT_C_SKIPS_HOOK:
+        quiz_text = M.QUIZ.get(lang, M.QUIZ.get("en", ""))
+        btns      = M.QUIZ_BUTTONS.get(lang, M.QUIZ_BUTTONS.get("en", []))
+        quiz_kb   = [[InlineKeyboardButton(lbl, callback_data=cb)] for lbl, cb in btns]
+        sent = False
+        if os.path.exists(HOOK_IMAGE_PATH):
+            try:
+                with open(HOOK_IMAGE_PATH, "rb") as photo:
+                    await context.bot.send_photo(
+                        chat_id=chat_id, photo=photo,
+                        caption=hook_text, parse_mode=ParseMode.MARKDOWN,
+                        reply_markup=InlineKeyboardMarkup(quiz_kb))
+                sent = True
+            except Exception as e:
+                logger.warning(f"C photo failed: {e}")
+        if not sent:
+            await context.bot.send_message(
+                chat_id=chat_id, text=hook_text, parse_mode=ParseMode.MARKDOWN,
+                reply_markup=InlineKeyboardMarkup(quiz_kb))
+        track_event(user_id, "hook_shown")
+        update_user(user_id, state=State.QUIZ)
+        return
 
-    # Сначала пробуем файл из репо
+    # Варианты A и B — фото + HOOK + кнопки языков
+    sent = False
     if os.path.exists(HOOK_IMAGE_PATH):
         try:
             with open(HOOK_IMAGE_PATH, "rb") as photo:
                 await context.bot.send_photo(
-                    chat_id=chat_id,
-                    photo=photo,
-                    caption=hook_text,
-                    parse_mode=ParseMode.MARKDOWN,
+                    chat_id=chat_id, photo=photo,
+                    caption=hook_text, parse_mode=ParseMode.MARKDOWN,
                     reply_markup=markup)
             sent = True
-            logger.info("HOOK sent as photo from file")
         except TelegramError as e:
-            logger.warning(f"Photo from file failed: {e}")
-
-    # Если файл не найден — пробуем по URL
+            logger.warning(f"Photo file failed: {e}")
     if not sent:
         try:
             await context.bot.send_photo(
-                chat_id=chat_id,
-                photo=HOOK_IMAGE_URL,
-                caption=hook_text,
-                parse_mode=ParseMode.MARKDOWN,
+                chat_id=chat_id, photo=HOOK_IMAGE_URL,
+                caption=hook_text, parse_mode=ParseMode.MARKDOWN,
                 reply_markup=markup)
             sent = True
-            logger.info("HOOK sent as photo from URL")
         except TelegramError as e:
-            logger.warning(f"Photo from URL failed: {e}")
-
-    # Fallback: если картинка недоступна — просто текст
+            logger.warning(f"Photo URL failed: {e}")
     if not sent:
         await context.bot.send_message(
-            chat_id=chat_id,
-            text=hook_text,
-            parse_mode=ParseMode.MARKDOWN,
-            reply_markup=markup)
-        logger.info("HOOK sent as text (no image)")
+            chat_id=chat_id, text=hook_text,
+            parse_mode=ParseMode.MARKDOWN, reply_markup=markup)
+    track_event(user_id, "hook_shown")
+
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -215,6 +233,7 @@ async def interest_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     update_user(user_id, interest=interest, state=State.QUIZ)
     logger.info(f"INTEREST user={user_id} interest={interest} lang={lang}")
+    track_event(user_id, "quiz_answered")
 
     # Подтверждение выбора
     ack = M.QUIZ_ACK.get(lang, M.QUIZ_ACK.get("en", "Got it."))
@@ -760,6 +779,22 @@ async def _handle_ai_chat(update, context, user_id, lang, interest, geo, user_te
     add_ai_message(user_id, "assistant", response)
     add_tone(user_id, detect_tone(user_text, history))
 
+    # Трекаем позитивные сообщения для реферала
+    if is_positive_message(user_text):
+        pos_count = user.get("positive_msg_count", 0) + 1
+        update_user(user_id, positive_msg_count=pos_count)
+        # Предлагаем реферал после 5 позитивных
+        if should_offer_referral(user_id, pos_count):
+            await asyncio.sleep(_typing_delay(response) * 0.5)
+            await update.message.reply_text(response, parse_mode=ParseMode.MARKDOWN)
+            await asyncio.sleep(2.0)
+            ref_text = get_referral_offer_text(lang, user_id)
+            await context.bot.send_message(
+                chat_id=chat_id, text=ref_text, parse_mode=ParseMode.MARKDOWN)
+            add_ai_message(user_id, "assistant", ref_text)
+            track_referral_offer(user_id)
+            return
+
     if funnel_stage == "subscribed" and new_count % FTD_PUSH_EVERY == 0:
         ftd = M.get(M.FTD_PUSH, lang, refined)
         if ftd:
@@ -768,6 +803,22 @@ async def _handle_ai_chat(update, context, user_id, lang, interest, geo, user_te
             await asyncio.sleep(1.5)
             await context.bot.send_message(chat_id=chat_id, text=ftd, parse_mode=ParseMode.MARKDOWN)
             return
+
+    # Показываем калькулятор casino/nodeposit пользователям
+    if should_show_calculator(interest, funnel_stage, new_count):
+        await asyncio.sleep(_typing_delay(response) * 0.5)
+        await update.message.reply_text(response, parse_mode=ParseMode.MARKDOWN)
+        await asyncio.sleep(1.5)
+        intro = get_calc_intro(lang, interest)
+        btns  = get_deposit_buttons(lang)
+        kb    = [[InlineKeyboardButton(lbl, callback_data=cb)] for lbl, cb in btns]
+        trigger = get_calculator_trigger_text(lang, interest)
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=f"{trigger}\n\n{intro}",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup(kb))
+        return
 
     if new_count % IMAGE_EVERY_N == 0:
         if await _send_image(context, chat_id, refined, caption=response):
@@ -780,6 +831,64 @@ async def _handle_ai_chat(update, context, user_id, lang, interest, geo, user_te
 # ════════════════════════════════════════════════════════════════════════════
 #  /stats, /help, /admin_fetch_ids, /debug
 # ════════════════════════════════════════════════════════════════════════════
+async def calc_deposit_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Пользователь выбрал размер депозита в калькуляторе."""
+    query   = update.callback_query; await query.answer()
+    user_id = query.from_user.id
+    user    = get_user(user_id)
+    lang    = user.get("lang", "en")
+    interest= user.get("interest", "betting")
+    chat_id = query.message.chat_id
+
+    deposit = parse_deposit_callback(query.data)
+    if deposit is None: return
+
+    try: await query.edit_message_reply_markup(reply_markup=None)
+    except Exception: pass
+
+    # Для betting — показываем stake buttons
+    if interest == "betting":
+        await context.bot.send_chat_action(chat_id, "typing")
+        await asyncio.sleep(1.0)
+        intro = get_calc_intro(lang, "betting")
+        btns  = get_stake_buttons(lang)
+        kb    = [[InlineKeyboardButton(lbl, callback_data=cb)] for lbl, cb in btns]
+        await context.bot.send_message(
+            chat_id=chat_id, text=intro, parse_mode=ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup(kb))
+        update_user(user_id, calc_deposit=deposit)
+        return
+
+    # Для casino/nodeposit — сразу результат
+    await context.bot.send_chat_action(chat_id, "typing")
+    await asyncio.sleep(1.5)
+    result_text = format_casino_result(lang, deposit, interest)
+    await context.bot.send_message(
+        chat_id=chat_id, text=result_text, parse_mode=ParseMode.MARKDOWN)
+    add_ai_message(user_id, "assistant", result_text)
+
+async def calc_stake_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Пользователь выбрал размер ставки (для betting)."""
+    query   = update.callback_query; await query.answer()
+    user_id = query.from_user.id
+    user    = get_user(user_id)
+    lang    = user.get("lang", "en")
+    chat_id = query.message.chat_id
+
+    stake = parse_deposit_callback(query.data)
+    if stake is None: return
+
+    try: await query.edit_message_reply_markup(reply_markup=None)
+    except Exception: pass
+
+    await context.bot.send_chat_action(chat_id, "typing")
+    await asyncio.sleep(1.5)
+    result_text = format_betting_result(lang, stake)
+    await context.bot.send_message(
+        chat_id=chat_id, text=result_text, parse_mode=ParseMode.MARKDOWN)
+    add_ai_message(user_id, "assistant", result_text)
+
+
 async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     users = get_all_users()
     by_state, by_lang, by_geo, subscribed = {}, {}, {}, 0
@@ -792,6 +901,12 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "By state:\n" + "\n".join(f"  {s}: {c}" for s,c in sorted(by_state.items())) +
             "\n\nBy lang:\n" + "\n".join(f"  {l}: {c}" for l,c in sorted(by_lang.items())) +
             "\n\nBy GEO:\n" + "\n".join(f"  {g}: {c}" for g,c in sorted(by_geo.items())))
+    await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
+
+async def admin_ab_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """A/B тест статистика."""
+    stats = get_ab_stats()
+    text  = format_ab_stats_message(stats)
     await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -957,17 +1072,22 @@ def main():
     app.add_handler(CommandHandler("stats",           stats_command))
     app.add_handler(CommandHandler("debug",           debug_command))
     app.add_handler(CommandHandler("admin_fetch_ids", admin_fetch_ids))
+    app.add_handler(CommandHandler("admin_ab",        admin_ab_stats))
 
     app.add_handler(CallbackQueryHandler(lang_chosen,       pattern=r"^lang_"))
     app.add_handler(CallbackQueryHandler(interest_chosen,   pattern=r"^int_"))
     app.add_handler(CallbackQueryHandler(geo_chosen,        pattern=r"^geo_"))
     app.add_handler(CallbackQueryHandler(commitment_chosen, pattern=r"^cm_"))
     app.add_handler(CallbackQueryHandler(user_joined,       pattern=r"^user_joined$"))
+    app.add_handler(CallbackQueryHandler(calc_deposit_chosen, pattern=r"^calc_dep_"))
+    app.add_handler(CallbackQueryHandler(calc_stake_chosen,   pattern=r"^calc_stake_"))
 
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    app.job_queue.run_repeating(reengage_job,        interval=30*60, first=60)
-    app.job_queue.run_repeating(subscribed_push_job, interval=60*60, first=120)
+    app.job_queue.run_repeating(reengage_job,        interval=30*60,  first=60)
+    app.job_queue.run_repeating(subscribed_push_job, interval=60*60,  first=120)
+    app.job_queue.run_repeating(daily_signal_job,    interval=60*60,  first=300)   # каждый час, проверяет таймзону
+    app.job_queue.run_repeating(adrenaline_check_job,interval=15*60,  first=180)   # каждые 15 мин
 
     logger.info("OddsVault Bot v10 🚀  Valeria is online.")
     app.run_polling(drop_pending_updates=True)
