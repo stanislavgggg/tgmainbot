@@ -230,23 +230,39 @@ async def ask_valeria_conversational(
 
     # Инструкции по стадии
     if funnel_stage == "discovery":
-        stage_instr = """DISCOVERY — user just started talking. You don't know their interest yet.
+        stage_instr = """DISCOVERY — learn who this person is through natural conversation.
 Goals:
-1. Respond naturally to what they said
-2. Ask ONE question that uncovers their interest (betting vs casino vs nodeposit)
-3. If they mention a country/league — note it, use it
-4. Keep it conversational — this is a chat, not a form
-5. DO NOT ask about language or country explicitly — pick it up from context
-6. Add [READY:warming] on its own line when you've identified their interest (after 1-2 exchanges)"""
+1. Respond to what they ACTUALLY said — not a generic opener
+2. One question per reply — the most useful one right now
+3. Pick up interest/GEO from what they say — never ask directly
+4. Add [INTEREST:xxx] tag when you're confident about their interest
+5. Add [READY:warming] when you know their interest AND have built rapport
+   — Could be 1 exchange (they say "I bet on La Liga every week")
+   — Could be 5 exchanges (they're vague and skeptical)
+   — Trust the conversation, not a counter"""
 
     elif funnel_stage == "warming":
-        stage_instr = f"""WARMING — you know their interest: {effective_interest}
-Goals:
-1. Build genuine curiosity about what's in the channel
-2. Use real data (from search context) or compelling patterns
-3. Ask questions that reveal MORE about their situation (experience, typical stake, goals)
-4. Each reply should feel like you're learning about THEM, not selling
-5. After 2-3 good exchanges → add [READY:tease] on its own line"""
+        stage_instr = f"""WARMING — deepen the conversation, earn the right to tease.
+You know their interest: {effective_interest}
+
+Your job: understand THEIR specific situation deeply before showing the channel.
+Ask about: experience level, what they've tried, what's blocked them, goals.
+Each exchange should reveal something new about them.
+
+Add [READY:tease] when ALL of these are true:
+  ✓ You understand their specific situation (not just general interest)
+  ✓ You've addressed their main concern or hesitation
+  ✓ There's genuine curiosity — they're asking questions or engaging
+  ✓ The conversation has natural momentum toward "show me"
+
+DO NOT add [READY:tease] when:
+  ✗ They're still skeptical or resistant
+  ✗ You haven't addressed their main objection yet
+  ✗ The conversation feels forced or one-sided
+  ✗ They're giving one-word answers without engagement
+
+There's no minimum or maximum number of exchanges.
+A 10-message conversation with a skeptic is normal and good."""
 
     else:  # subscribed
         if ftd_done:
