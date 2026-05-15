@@ -28,6 +28,7 @@ from ai_agent import (ask_valeria, detect_tone, generate_warm_opener, get_commit
 from membership import (check_membership, MemberStatus, resolve_channel, resolve_lang,
                         infer_geo_from_tg_lang, get_channel_link, get_channel_title,
                         GEO_QUIZ, fetch_channel_ids)
+from ftd_onboarding import schedule_onboarding, detect_ftd_signal
 import messages as M
 from config import ANTHROPIC_KEY
 
@@ -369,30 +370,15 @@ async def user_joined(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_message(
         chat_id=chat_id, text=M.get(M.POST_SUB, lang, interest), parse_mode=ParseMode.MARKDOWN)
 
-    profile = get_profile(user_id)
-    context.job_queue.run_once(
-        _proactive_hook_job, when=120,
-        data={"user_id": user_id, "chat_id": chat_id,
-              "lang": lang, "interest": interest, "geo": geo, "profile": profile},
-        name=f"hook_{user_id}")
-
-
-async def _proactive_hook_job(context: ContextTypes.DEFAULT_TYPE):
-    d = context.job.data
-    user_id, chat_id = d["user_id"], d["chat_id"]
-    lang, interest, geo, profile = d["lang"], d["interest"], d.get("geo","OTHER"), d.get("profile",{})
-    if get_user(user_id).get("ai_msg_count", 0) > 0:
-        return
-    try:
-        hook = await generate_post_sub_hook(lang=lang, interest=interest, user_profile=profile, geo=geo)
-        await context.bot.send_chat_action(chat_id=chat_id, action="typing")
-        await asyncio.sleep(2.0)
-        await context.bot.send_message(chat_id=chat_id, text=hook, parse_mode=ParseMode.MARKDOWN)
-        add_ai_message(user_id, "assistant", hook)
-        mark_push_sent(user_id)
-        logger.info(f"Proactive hook → {user_id}")
-    except Exception as e:
-        logger.error(f"Hook error [{user_id}]: {e}")
+    # Полный FTD онбординг: 4 шага (90s / 30min / 2h / 6h)
+    schedule_onboarding(
+        job_queue=context.job_queue,
+        user_id=user_id,
+        chat_id=chat_id,
+        lang=lang,
+        interest=interest,
+    )
+    logger.info(f"Onboarding started → {user_id} [{lang}/{interest}]")
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -443,6 +429,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     interest = user.get("interest", "betting")
     geo      = user.get("geo", "OTHER")
 
+    # ── Детектор ГЕО из текста (если пользователь написал страну) ────────────
+    # Работает в любом состоянии — обновляет канал и язык на правильные
+    if geo in ("OTHER", "") and state not in (State.LANG, State.QUIZ):
+        detected_geo = _detect_geo_from_text(user_text)
+        if detected_geo and detected_geo != geo:
+            new_lang = resolve_lang(detected_geo)
+            update_user(user_id, geo=detected_geo, lang=new_lang)
+            geo  = detected_geo
+            lang = new_lang
+            logger.info(f"GEO detected from text: {detected_geo} → lang={new_lang}")
+
     # Silent profile update
     if len(user_text) > 8:
         asyncio.create_task(_update_profile_silent(user_id, user_text, lang))
@@ -489,6 +486,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif state == State.CTA:
         await _handle_cta(update, context, user_id, lang, interest, geo, user_text)
     elif state in (State.AI_CHAT, State.SUBSCRIBED):
+        # Детектируем FTD — пользователь написал что сделал депозит
+        if detect_ftd_signal(user_text) and not user.get("ftd_done"):
+            update_user(user_id, ftd_done=True)
+            logger.info(f"FTD detected for user {user_id}: {user_text[:50]!r}")
+            # Отвечаем AI и поздравляем
         await _handle_ai_chat(update, context, user_id, lang, interest, geo, user_text, user)
 
 
@@ -535,6 +537,25 @@ def _detect_lang_switch(text: str):
         "switch to latvian", "latviešu", "latviski", "speak latvian",
     ]):
         return "lv"
+    return None
+
+
+def _detect_geo_from_text(text: str):
+    """
+    Детектирует страну из свободного текста.
+    Если geo=OTHER — обновляем на правильный канал и язык.
+    """
+    t = text.lower()
+    if any(w in t for w in ["spain","españa","espana","spanish","español","madrid","barcelona","seville","valencia","bilbao"]):
+        return "ES"
+    if any(w in t for w in ["croatia","hrvatska","croatian","zagreb","split","dubrovnik","rijeka"]):
+        return "HR"
+    if any(w in t for w in ["serbia","srbija","serbian","belgrade","beograd","novi sad","bosnia","balkan","macedon","montenegro","slovenia"]):
+        return "RS"
+    if any(w in t for w in ["lithuania","lietuva","lithuanian","vilnius","kaunas","klaipeda"]):
+        return "LT"
+    if any(w in t for w in ["latvia","latvija","latvian","riga","daugavpils"]):
+        return "LV"
     return None
 
 
@@ -715,10 +736,12 @@ async def _handle_ai_chat(update, context, user_id, lang, interest, geo, user_te
     add_ai_message(user_id, "user", user_text)
     await context.bot.send_chat_action(chat_id, "typing")
 
+    ftd_done = bool(user.get("ftd_done"))
     response, refined, _, technique_used = await ask_valeria(
         user_message=user_text, history=history, lang=lang, interest=interest,
         funnel_stage=funnel_stage, psychotype=psychotype, objections=objections,
-        used_techniques=used_techniques, geo=geo, user_profile=profile)
+        used_techniques=used_techniques, geo=geo, user_profile=profile,
+        ftd_done=ftd_done)
 
     if technique_used: log_technique(user_id, technique_used)
     new_count     = msg_count + 1
