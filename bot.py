@@ -187,16 +187,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             chat_id=chat_id, text=hook_text, parse_mode=ParseMode.MARKDOWN)
 
     track_event(user_id, "hook_shown")
-
-    # Сразу после фото — открывающий вопрос (без кнопок)
-    await asyncio.sleep(1.5)
-    await context.bot.send_chat_action(chat_id, "typing")
-    await asyncio.sleep(1.2)
-    opening = OPENING_QUESTION.get(lang, OPENING_QUESTION["en"])
-    await context.bot.send_message(
-        chat_id=chat_id, text=opening, parse_mode=ParseMode.MARKDOWN)
-
-    # Переходим в WARM1 — пользователь теперь в диалоге
+    # OPENING_QUESTION встроен в HOOK текст — отдельно не отправляем
     update_user(user_id, state=State.WARM1, funnel_stage="discovery")
 
 
