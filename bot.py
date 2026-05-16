@@ -287,7 +287,9 @@ async def user_joined(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_chat_action(chat_id, "typing")
     await asyncio.sleep(1.5)
 
-    opener = get_post_sub_opener(lang, interest) or M.get(M.POST_SUB, lang, interest)
+    # CRO #4: передаём ab_variant для A/B теста post-sub онбординга
+    ab_variant = user.get("ab_variant", "A")
+    opener = get_post_sub_opener(lang, interest, ab_variant) or M.get(M.POST_SUB, lang, interest)
     await context.bot.send_message(
         chat_id=chat_id, text=opener, parse_mode=ParseMode.MARKDOWN)
 
@@ -684,22 +686,24 @@ async def _handle_ai_chat(update, context, user_id, lang, interest, geo, user_te
                 logger.error(f"generate_step4: {e}")
             if not response:
                 response = _fb("step4", lang)
+            # После шага 4 помечаем что onboarding исчерпан
+            if new_msg_count == 12:
+                update_user(user_id, pre_ftd_exhausted=True)
 
         else:
-            # Maintenance mode: 12+ сообщений без FTD — не давим, даём ценность
-            # Обычный диалог с мягким напоминанием о канале
+            # Maintenance mode: 12+ сообщений без FTD — не давим, даём ценность.
+            # funnel_stage="subscribed_waiting" даёт AI мягкий промпт без CTA-давления.
             result = await ask_valeria_conversational(
                 user_message=user_text,
                 history=history,
                 lang=lang,
                 interest=interest,
                 geo=geo,
-                funnel_stage="subscribed",
+                funnel_stage="subscribed_waiting",
                 psychotype=psychotype,
                 user_profile=profile,
                 objections=objections,
                 ftd_done=False,
-                current_angle=5,  # финальный угол — без агрессии
             )
             response = result["text"]
 
@@ -1003,8 +1007,10 @@ async def subscribed_push_job(context: ContextTypes.DEFAULT_TYPE):
         lang     = user.get("lang", "en")
         interest = user.get("interest", "betting")
         ftd_done = bool(user.get("ftd_done"))
+        # CRO #3: передаём barrier для barrier-aware push
+        barrier  = user.get("onboarding_barrier", "unknown")
 
-        text = get_silence_push(lang, ftd_done)
+        text = get_silence_push(lang, ftd_done, barrier)
         if not text:
             continue
 
