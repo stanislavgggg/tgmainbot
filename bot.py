@@ -488,28 +488,21 @@ async def _update_profile_silent(user_id, text, lang):
 
 
 def _detect_lang_from_content(text: str) -> Optional[str]:
-    """
-    Определяет язык из содержимого сообщения пользователя.
-    Используется для автоматической блокировки языка на первых репликах.
-    Возвращает код языка или None если не определить.
-    """
+    """Определяет язык из содержимого сообщения. Возвращает код или None."""
     t = text.lower().strip()
-    # Испанский — характерные слова и буквы
-    es_signals = ["hola", "qué", "que", "cómo", "como", "gracias", "sí", "también",
-                  "también", "estoy", "estás", "eres", "tienes", "tengo", "pero",
-                  "porque", "cuando", "donde", "aquí", "para", "con", "por", "del",
-                  "darknet", "guapa", "chica", "amigo", "español"]
-    # Хорватский
-    hr_signals = ["hvala", "dobro", "kako", "gdje", "što", "zašto", "nije", "sam",
-                  "imam", "idem", "mogu", "nema", "bok", "zdravo"]
-    # Литовский
-    lt_signals = ["labas", "kaip", "kodėl", "taip", "ne", "gerai", "ačiū",
-                  "esu", "turiu", "noriu", "geras"]
-    # Латышский
-    lv_signals = ["sveiki", "kā", "labi", "paldies", "jā", "nē", "esmu",
-                  "man", "ir", "var", "labs"]
+    es_signals = {"hola", "qué", "que", "cómo", "como", "gracias", "sí", "también",
+                  "estoy", "estás", "eres", "tienes", "tengo", "pero", "porque",
+                  "cuando", "donde", "aquí", "para", "con", "por", "del",
+                  "darknet", "guapa", "chica", "amigo", "español"}
+    hr_signals = {"hvala", "dobro", "kako", "gdje", "što", "zašto", "nije", "sam",
+                  "imam", "idem", "mogu", "nema", "bok", "zdravo"}
+    lt_signals = {"labas", "kaip", "kodėl", "taip", "gerai", "ačiū",
+                  "esu", "turiu", "noriu", "geras"}
+    lv_signals = {"sveiki", "labi", "paldies", "esmu", "var", "labs"}
 
-    # Подсчёт совпадений
+    if re.search(r'[а-яё]', t):
+        return "en"
+
     scores = {"es": 0, "hr": 0, "lt": 0, "lv": 0}
     words = set(re.findall(r"\w+", t))
     for w in words:
@@ -518,16 +511,12 @@ def _detect_lang_from_content(text: str) -> Optional[str]:
         if w in lt_signals: scores["lt"] += 1
         if w in lv_signals: scores["lv"] += 1
 
-    # Наличие кириллицы → en (бот не работает с русским, но не меняем на другой)
-    if re.search(r'[а-яё]', t):
-        return "en"  # fallback на английский для кириллицы
-
     best = max(scores, key=lambda k: scores[k])
-    if scores[best] >= 1:
-        return best
+    return best if scores[best] >= 1 else None
 
-    # Если явных маркеров нет — возвращаем None (не меняем язык)
-    return None
+
+def _detect_lang_switch(text: str) -> Optional[str]:
+    """Явное переключение языка командой пользователя."""
     t = text.lower().strip()
     if any(t == p or t.startswith(p) for p in [
         "switch to english", "english please", "speak english",
