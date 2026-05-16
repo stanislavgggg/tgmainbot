@@ -120,7 +120,7 @@ VOICE RULES:
 
 async def _generate(system,user_content="Write the message.",history=None,max_tokens=280,timeout=20) -> Optional[str]:
     if not ANTHROPIC_KEY: return None
-    messages = list(_sanitize_history(history[-6:])) if history else []
+    messages = list(_sanitize_history(history[-16:])) if history else []
     messages.append({"role":"user","content":user_content})
     try:
         data = await _post_with_retry(ANTHROPIC_URL,
