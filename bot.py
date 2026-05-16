@@ -17,7 +17,8 @@ from telegram.ext import (Application, CallbackQueryHandler, CommandHandler,
                           ContextTypes, MessageHandler, filters)
 from config import BOT_TOKEN, State
 from storage import (add_ai_message, add_tone, get_all_users, get_ai_history, get_user,
-                     update_user, mark_push_sent, classify_objection, log_objection,
+                     update_user, update_user_no_active, mark_push_sent,
+                     classify_objection, log_objection,
                      get_objections, update_psychotype, get_psychotype,
                      get_profile, update_profile)
 from ai_agent import detect_tone, extract_profile_update, ANTHROPIC_KEY
@@ -796,6 +797,10 @@ async def reengage_job(context: ContextTypes.DEFAULT_TYPE):
     - Шлём следующий угол по очереди из _REENGAGE_ANGLES
     - Если дошли до последнего угла — добавляем CTA кнопку
     - После последнего угла больше не беспокоим
+
+    ВАЖНО: используем update_user_no_active чтобы не сбивать last_active.
+    Иначе после отправки last_active обновляется, и через 30 минут job снова
+    видит 'свежего' пользователя и шлёт тот же угол повторно.
     """
     now = datetime.now(timezone.utc).timestamp()
 
@@ -848,15 +853,16 @@ async def reengage_job(context: ContextTypes.DEFAULT_TYPE):
                 chat_id=user_id, text=text,
                 parse_mode=ParseMode.MARKDOWN, reply_markup=kb)
 
-            # Двигаем угол вперёд
+            # Двигаем угол вперёд БЕЗ обновления last_active —
+            # иначе job через 30 минут снова увидит молчание < 4ч и не пошлёт следующий угол
             next_angle = current_angle + 1
             if is_last:
-                # Больше не беспокоим
-                update_user(user_id, current_angle=next_angle, reengage_exhausted=True)
+                update_user_no_active(user_id, current_angle=next_angle,
+                                      reengage_exhausted=True)
                 logger.info(f"Reengage EXHAUSTED angle={idx} → {user_id}")
             else:
-                update_user(user_id, current_angle=next_angle,
-                            reengage_1_sent=True)
+                update_user_no_active(user_id, current_angle=next_angle,
+                                      reengage_1_sent=True)
                 logger.info(f"Reengage angle={idx} [{funnel}] → {user_id}")
 
         except TelegramError as e:
