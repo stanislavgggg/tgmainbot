@@ -20,6 +20,7 @@ from ai_agent import (
     _sanitize_history, _fallback_response,
     _safe_web_search, _clean_for_telegram, _strip_thinking,
 )
+from conversation_analyzer import build_conversation_context
 
 logger = logging.getLogger(__name__)
 
@@ -182,6 +183,9 @@ async def ask_valeria_conversational(
             "\nGeneral patterns and mechanisms only. Zero invented specifics."
         )
 
+    # ── Conversation analysis (Belfort personalization) ───────────────────
+    conversation_ctx = build_conversation_context(history)
+
     # ── Stage instructions ────────────────────────────────────────────────────
 
     if funnel_stage == "discovery":
@@ -289,6 +293,8 @@ PSYCHOTYPE: {psychotype_instr}
 {_build_obj_summary(objections)}
 {_build_profile_ctx(user_profile)}
 {search_section}
+
+{conversation_ctx}
 
 ━━━ STAGE ━━━
 {stage_instr}
