@@ -40,7 +40,7 @@ from typing import Optional
 
 import httpx
 
-from storage import (get_all_users, get_user, update_user,
+from storage import (get_all_users, get_user, update_user, update_user_no_active,
                      add_ai_message, mark_push_sent, get_profile, get_ai_history)
 from ai_agent import (_post_with_retry, _build_profile_ctx,
                       ANTHROPIC_URL, MODEL, ANTHROPIC_KEY)
@@ -403,7 +403,7 @@ async def adrenaline_check_job(context) -> None:
                 text=text,
                 parse_mode="Markdown")
             add_ai_message(user_id, "assistant", text)
-            update_user(user_id,
+            update_user_no_active(user_id,
                 last_adrenaline_at=now.isoformat(),
                 adrenaline_sent_today=adrenaline_today + 1)
             mark_push_sent(user_id)
