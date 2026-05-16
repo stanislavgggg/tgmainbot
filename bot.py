@@ -545,6 +545,23 @@ async def _handle_cta(update, context, user_id, lang, interest, geo, user_text):
 #  AI Chat (subscribed)
 # ════════════════════════════════════════════════════════════════════════════
 async def _handle_ai_chat(update, context, user_id, lang, interest, geo, user_text, user):
+    """
+    CRO-оптимизированный handler для subscribed пользователей.
+
+    PRE-FTD: не болтаем — закрываем на первый депозит.
+      Логика: barrier → готовый ответ из ftd_onboarding._fb() → конкретный CTA.
+      msg_count 1→2: step1 (как канал работает + вопрос)
+      msg_count 3→5: barrier ответ (адресуем возражение)
+      msg_count 6→9: social proof + urgency
+      msg_count 10+: финальный push, потом замолкаем
+
+    POST-FTD: обычный диалог через ask_valeria_conversational.
+    """
+    from ftd_onboarding import (
+        classify_barrier, generate_step1, generate_step2,
+        generate_step3, generate_step4, _fb,
+    )
+
     chat_id    = update.effective_chat.id
     history    = get_ai_history(user_id)
     msg_count  = user.get("ai_msg_count", 0)
@@ -559,11 +576,12 @@ async def _handle_ai_chat(update, context, user_id, lang, interest, geo, user_te
         log_objection(user_id, obj_type)
 
     add_ai_message(user_id, "user", user_text)
-    update_user(user_id, ai_msg_count=msg_count + 1,
+    new_msg_count = msg_count + 1
+    update_user(user_id, ai_msg_count=new_msg_count,
                 last_user_message_at=datetime.now(timezone.utc).isoformat())
     await context.bot.send_chat_action(chat_id, "typing")
 
-    # ── S16/S17: Win/Loss ────────────────────────────────────────────────────
+    # ── S16/S17: Win/Loss (post-FTD) ─────────────────────────────────────────
     if ftd_done:
         msg_type = classify_post_ftd_message(user_text)
         if msg_type == "won":
@@ -591,7 +609,80 @@ async def _handle_ai_chat(update, context, user_id, lang, interest, geo, user_te
             add_ai_message(user_id, "assistant", vip_msg)
             return
 
-    # ── Основной диалог ───────────────────────────────────────────────────────
+    # ════════════════════════════════════════════════════════════════════════
+    #  PRE-FTD: закрываем на депозит через onboarding логику
+    #  НЕ болтаем — каждый ответ двигает к конкретному действию
+    # ════════════════════════════════════════════════════════════════════════
+    if not ftd_done:
+        barrier = user.get("onboarding_barrier", "unknown")
+
+        # Если barrier ещё не классифицирован и есть достаточно истории — классифицируем
+        if barrier == "unknown" and len(history) >= 2:
+            try:
+                barrier = await classify_barrier(history, lang, interest, psychotype)
+                update_user(user_id, onboarding_barrier=barrier)
+                logger.info(f"Barrier classified on reply: {barrier} → {user_id}")
+            except Exception as e:
+                logger.debug(f"classify_barrier inline: {e}")
+
+        # Обновляем barrier если пришло новое возражение
+        if obj_type and obj_type in (
+            "no_money","no_trust","dont_understand","not_urgent","already_elsewhere"
+        ):
+            barrier = obj_type
+            update_user(user_id, onboarding_barrier=barrier)
+
+        response = None
+
+        if new_msg_count <= 2:
+            # Шаг 1: объясняем как канал работает, задаём личный вопрос
+            try:
+                response = await generate_step1(
+                    lang, interest, psychotype, profile, history, objections)
+            except Exception as e:
+                logger.error(f"generate_step1: {e}")
+            if not response:
+                response = _fb("step1", lang, interest)
+
+        elif new_msg_count <= 5:
+            # Шаг 2: адресуем конкретный barrier
+            try:
+                response = await generate_step2(
+                    lang, interest, psychotype, profile, history, objections, barrier)
+            except Exception as e:
+                logger.error(f"generate_step2: {e}")
+            if not response:
+                response = _fb("barrier", lang, interest, barrier)
+
+        elif new_msg_count <= 9:
+            # Шаг 3: social proof — кто-то похожий сделал шаг
+            try:
+                response = await generate_step3(
+                    lang, interest, psychotype, profile, history, objections, barrier)
+            except Exception as e:
+                logger.error(f"generate_step3: {e}")
+            if not response:
+                response = _fb("step3", lang)
+
+        else:
+            # Шаг 4: финальный push с urgency, потом замолкаем
+            try:
+                response = await generate_step4(
+                    lang, interest, psychotype, profile, history, objections, barrier)
+            except Exception as e:
+                logger.error(f"generate_step4: {e}")
+            if not response:
+                response = _fb("step4", lang)
+
+        add_ai_message(user_id, "assistant", response)
+        add_tone(user_id, detect_tone(user_text, history))
+        await asyncio.sleep(_typing_delay(response) * 0.5)
+        await update.message.reply_text(response, parse_mode=ParseMode.MARKDOWN)
+        return
+
+    # ════════════════════════════════════════════════════════════════════════
+    #  POST-FTD: обычный диалог
+    # ════════════════════════════════════════════════════════════════════════
     result = await ask_valeria_conversational(
         user_message=user_text,
         history=history,
@@ -630,8 +721,7 @@ async def _handle_ai_chat(update, context, user_id, lang, interest, geo, user_te
             return
 
     # ── Калькулятор ───────────────────────────────────────────────────────────
-    new_count = msg_count + 1
-    if should_show_calculator(interest, "subscribed", new_count):
+    if should_show_calculator(interest, "subscribed", new_msg_count):
         await asyncio.sleep(_typing_delay(response) * 0.5)
         await update.message.reply_text(response, parse_mode=ParseMode.MARKDOWN)
         await asyncio.sleep(1.5)
