@@ -143,13 +143,13 @@ def track_event(user_id: int, event: str) -> None:
     """
     Записывает событие для A/B метрик.
     Events: 'hook_shown', 'quiz_answered', 'geo_answered',
-            'warm_replied', 'cta_clicked', 'subscribed', 'ftd_done'
+            'warm_replied', 'cta_clicked', 'subscribed', 'ftd_done',
+            'post_sub_replied'  — пользователь ответил на post-sub opener
     """
     from storage import get_user, update_user
     user = get_user(user_id)
     variant = user.get("ab_variant", "A")
 
-    # Загружаем текущие метрики
     metrics = user.get("ab_metrics", {})
     if event not in metrics:
         metrics[event] = 0
@@ -170,7 +170,7 @@ def get_ab_stats() -> dict:
     counts: dict[str, int] = {"A": 0, "B": 0, "C": 0}
 
     events = ["hook_shown", "quiz_answered", "geo_answered",
-              "warm_replied", "cta_clicked", "subscribed", "ftd_done"]
+              "warm_replied", "cta_clicked", "subscribed", "post_sub_replied", "ftd_done"]
 
     for v in stats:
         for e in events:
@@ -188,14 +188,19 @@ def get_ab_stats() -> dict:
     # Вычисляем conversion rates
     result = {}
     for v in ["A", "B", "C"]:
-        shown = stats[v].get("hook_shown", 0) or 1
+        shown    = stats[v].get("hook_shown", 0) or 1
+        subbed   = stats[v].get("subscribed", 0) or 1
         result[v] = {
-            "users":       counts[v],
-            "hook_shown":  stats[v].get("hook_shown", 0),
-            "quiz_rate":   round(stats[v].get("quiz_answered", 0) / shown * 100, 1),
-            "cta_rate":    round(stats[v].get("cta_clicked", 0) / shown * 100, 1),
-            "sub_rate":    round(stats[v].get("subscribed", 0) / shown * 100, 1),
-            "ftd_rate":    round(stats[v].get("ftd_done", 0) / shown * 100, 1),
+            "users":               counts[v],
+            "hook_shown":          stats[v].get("hook_shown", 0),
+            "quiz_rate":           round(stats[v].get("quiz_answered", 0) / shown * 100, 1),
+            "cta_rate":            round(stats[v].get("cta_clicked", 0) / shown * 100, 1),
+            "sub_rate":            round(stats[v].get("subscribed", 0) / shown * 100, 1),
+            # post-sub A/B: сколько ответили на opener после подписки
+            "post_sub_reply_rate": round(stats[v].get("post_sub_replied", 0) / max(subbed, 1) * 100, 1),
+            # главная метрика: FTD из подписавшихся
+            "ftd_from_sub_rate":   round(stats[v].get("ftd_done", 0) / max(subbed, 1) * 100, 1),
+            "ftd_rate":            round(stats[v].get("ftd_done", 0) / shown * 100, 1),
         }
 
     return result
@@ -204,24 +209,24 @@ def format_ab_stats_message(stats: dict) -> str:
     """Форматирует статистику для отправки в Telegram."""
     lines = ["📊 *A/B Test Results*\n"]
     variant_names = {
-        "A": "A — Rational (facts + expertise)",
-        "B": "B — Emotional (story + FOMO)",
-        "C": "C — Provocative (question only)",
+        "A": "A — Rational hook + Experience question",
+        "B": "B — Rational hook + Directive first step",
+        "C": "C — Rational hook + Social proof opener",
     }
     for v in ["A", "B", "C"]:
         s = stats.get(v, {})
         lines.append(f"*{variant_names[v]}*")
         lines.append(f"  Users: {s.get('users', 0)}")
-        lines.append(f"  Quiz rate: {s.get('quiz_rate', 0)}%")
-        lines.append(f"  CTA rate: {s.get('cta_rate', 0)}%")
         lines.append(f"  Sub rate: {s.get('sub_rate', 0)}%")
-        lines.append(f"  FTD rate: {s.get('ftd_rate', 0)}%\n")
+        lines.append(f"  Post-sub reply: {s.get('post_sub_reply_rate', 0)}%")
+        lines.append(f"  FTD/sub: {s.get('ftd_from_sub_rate', 0)}%")
+        lines.append(f"  FTD/shown: {s.get('ftd_rate', 0)}%\n")
 
-    # Определяем победителя по FTD rate
-    best = max(["A","B","C"], key=lambda v: stats.get(v,{}).get("ftd_rate", 0))
-    best_rate = stats.get(best, {}).get("ftd_rate", 0)
+    # Победитель по FTD/sub (главная метрика)
+    best = max(["A", "B", "C"], key=lambda v: stats.get(v, {}).get("ftd_from_sub_rate", 0))
+    best_rate = stats.get(best, {}).get("ftd_from_sub_rate", 0)
     if best_rate > 0:
-        lines.append(f"🏆 Best FTD: Variant *{best}* ({best_rate}%)")
+        lines.append(f"🏆 Best FTD/sub: Variant *{best}* ({best_rate}%)")
 
     total = sum(s.get("users", 0) for s in stats.values())
     lines.append(f"\n_Total users: {total}_")
