@@ -36,8 +36,7 @@ from ai_agent import (
 logger = logging.getLogger(__name__)
 
 # ════════════════════════════════════════════════════════════════════════════
-#  ОТКРЫВАЮЩИЙ ВОПРОС — первое что Валерия пишет после фото
-#  Заменяет QUIZ кнопки. Открытый, провокационный, без анкеты.
+#  ОТКРЫВАЮЩИЙ ВОПРОС
 # ════════════════════════════════════════════════════════════════════════════
 
 OPENING_QUESTION: dict[str, str] = {
@@ -144,7 +143,6 @@ def detect_geo_from_text(text: str) -> Optional[str]:
 
 # ════════════════════════════════════════════════════════════════════════════
 #  ГЛАВНАЯ ФУНКЦИЯ ДИАЛОГА — ask_valeria_conversational
-#  Один AI вызов. Знает весь контекст. Ведёт естественный разговор.
 # ════════════════════════════════════════════════════════════════════════════
 
 async def ask_valeria_conversational(
@@ -153,21 +151,22 @@ async def ask_valeria_conversational(
     lang: str,
     interest: Optional[str],
     geo: Optional[str],
-    funnel_stage: str,        # "discovery" | "warming" | "subscribed"
+    funnel_stage: str,
     psychotype: str = "neutral",
     user_profile: Optional[dict] = None,
     objections: Optional[dict] = None,
     ftd_done: bool = False,
     ftd_count: int = 0,
     search_context: Optional[str] = None,
+    current_angle: int = 0,
 ) -> dict:
     """
     Главная функция диалога. Возвращает dict:
     {
-      "text": str,                    — ответ Валерии
-      "detected_interest": str|None, — если определила interest из ответа
-      "detected_geo": str|None,      — если определила GEO из ответа
-      "next_stage": str|None,        — "tease" | "cta" | None
+      "text": str,
+      "detected_interest": str|None,
+      "detected_geo": str|None,
+      "next_stage": str|None,
       "move_to_tease": bool,
       "move_to_cta": bool,
     }
@@ -185,12 +184,11 @@ async def ask_valeria_conversational(
             "move_to_cta":       False,
         }
 
-    # Детектируем interest и GEO из текста пользователя прямо здесь
     detected_interest = detect_interest_from_text(user_message) if not interest else None
     detected_geo      = detect_geo_from_text(user_message) if not geo or geo == "OTHER" else None
 
     effective_interest = interest or detected_interest or "betting"
-    effective_geo      = (detected_geo or geo or "OTHER")
+    effective_geo      = detected_geo or geo or "OTHER"
 
     lang_names = {
         "en": "English — casual, direct",
@@ -216,7 +214,6 @@ async def ask_valeria_conversational(
         "neutral": "NEUTRAL: Hook → gap → next step.",
     }.get(psychotype, "NEUTRAL: Hook → gap → next step.")
 
-    # Контекст поиска
     search_section = ""
     if search_context:
         search_section = (
@@ -228,103 +225,120 @@ async def ask_valeria_conversational(
             "WITHOUT inventing specific team names, odds, or bonus amounts."
         )
 
-    # Инструкции по стадии
+    # ── Stage instructions ────────────────────────────────────────────────────
+
     if funnel_stage == "discovery":
-        stage_instr = """DISCOVERY — you just started talking. Move FAST toward the channel.
+        # Углы атаки по порядку — соответствуют _REENGAGE_ANGLES в bot.py
+        angle_hints = [
+            "Ask how they found this (curiosity hook)",
+            "Drop a specific number — 'Sharp money moved €2.3M before the line shifted. 15-minute window.'",
+            "Binary choice — 'You more of a sports person or casino?'",
+            "Pain angle — 'Most people here got burned going it alone first.'",
+            "Final push — make the cost of NOT joining feel real, then tease",
+        ]
+        current_hint = angle_hints[min(current_angle, len(angle_hints) - 1)]
 
-RULE 1 — GIVE VALUE in every reply.
-Real insight or fact FIRST, question AFTER. Never just ask questions.
-Examples: "Sharp money moved €2.3M before the public caught it"
-          "No-deposit bonuses with ×8 wagering are positive EV if you pick the right games"
-          "The window between signal and market correction is 15-45 minutes"
+        stage_instr = f"""DISCOVERY — exchange #{current_angle + 1} with this user.
 
-RULE 2 — DETECT INTENT, not just keywords.
-The user can show readiness in ANY language and ANY phrasing:
-- Wants to make money / earn / profit → ready NOW
-- Asks HOW to bet, deposit, start, win → ready NOW, answer briefly then tease
-- Mentions they already bet or play → ready NOW
-- Shows frustration with current results → ready NOW
-- Mentions a specific sport/league/team → betting interest confirmed
-- Mentions casino, slots, bonus → casino interest confirmed
-- Says "no money", "free", "without deposit" → nodeposit interest confirmed
+YOUR ONLY JOB: detect one signal, then move to tease. Not to chat. Not to be interesting. To convert.
 
-When you detect ANY of the above → add [READY:warming] immediately.
-Do NOT keep asking questions once you know their interest.
+CURRENT ANGLE (#{current_angle + 1}): {current_hint}
+Use this angle now. Don't repeat angles already used (exchanges 1-{current_angle} are done).
 
-RULE 3 — SPEED.
-1 exchange to identify interest → [READY:warming]
-1-2 warming exchanges with value → [READY:tease]
-Total path: 2-4 messages max for engaged users. Skeptics get more time."""
+━━━ SIGNAL DETECTION — ANY of these = move to tease on THIS message ━━━
+• Named a sport, team, league, casino game, or bonus type
+• Said they bet, play, gamble, or want to
+• Asked how to start, join, deposit, or win anything
+• Mentioned losing money, bad luck, or frustration with results
+• Said "any", "all", "both", "everything", "I don't know" → treat as betting interest
+• Gave a short/vague/nonsense answer → passive user, tease anyway
+• Any positive reaction to anything you said
+
+━━━ AFTER SIGNAL DETECTED ━━━
+1. Give ONE insight that makes them feel the cost of not having access.
+2. Tag [READY:tease] on the same message.
+3. Stop. No follow-up question.
+
+━━━ NO SIGNAL AFTER 4 EXCHANGES ━━━
+Exchange 5+ → [READY:tease] regardless. No exceptions. No more questions.
+
+━━━ HARD RULES ━━━
+• Signal detected → tease on NEXT message. No exceptions.
+• Never use the same angle twice.
+• Never ask about money, deposits, or bankroll before tease.
+• Never give a full answer to "how" questions — partial only, rest is "in the channel".
+• Short/vague/nonsense answer = passive user = tease faster, not slower."""
 
     elif funnel_stage == "warming":
-        stage_instr = f"""WARMING — interest confirmed: {effective_interest}
+        stage_instr = f"""WARMING — interest confirmed: {effective_interest}. Exchange #{current_angle + 1}.
 
-Give them a TASTE of what's in the channel. Make them feel the cost of NOT being there.
+MAXIMUM 2 exchanges here. Then [READY:tease]. No exceptions.
 
-Every message = one real insight they can't get elsewhere.
-After 1-2 exchanges that build genuine curiosity → [READY:tease]
+━━━ YOUR ONE JOB ━━━
+Make them feel what they're missing. Create the gap. Then [READY:tease].
 
-For {effective_interest}:
-- betting: line movements, sharp money signals, timing windows (15-45 min)
-- casino: wagering math, which games clear fastest, hidden promo windows
-- nodeposit: live offers comparison sites miss, which ones are positive EV
-- exclusive: arbitrage windows, stacking betting + bonus edges
+━━━ INSIGHT TO DROP (pick one, be specific) ━━━
+• betting:   "Sharp money hits 15-45 min before public sees it. By the time it's on Twitter, line already moved."
+• casino:    "Not all games count equally toward wagering. Wrong game = you clear 3x slower, bonus expires worthless."
+• nodeposit: "Most aggregator sites are 2 weeks behind. Half the offers they list are already expired."
+• exclusive: "Stacking a value bet signal with a reload bonus — that's where edge actually compounds."
 
-KEY: If they ask HOW to do anything → partial answer + "the full picture is in the channel"
-KEY: Any money/deposit/start intent → [READY:tease] immediately, no more questions
-KEY: A skeptic who's still engaging after 3 exchanges is ready — tease them
+━━━ PARTIAL ANSWER RULE ━━━
+They ask HOW → give 20% of the answer → "the full picture is in the channel" → [READY:tease]
 
-[READY:tease] = you've given value AND they're curious. Trust your read."""
+━━━ IMMEDIATE [READY:tease] — fire without waiting ━━━
+• They respond positively to any insight
+• They ask about access, joining, or next steps
+• They mention money or wanting to start
+• Exchange 2+ in warming — mandatory, no exceptions
+• Any short answer — they're done talking, move them"""
 
     else:  # subscribed
         if ftd_done:
-            stage_instr = f"""SUBSCRIBED — user has made {ftd_count} deposit(s). FTD done.
-Goals: Keep them active, push toward repeat deposit, optimize their strategy.
-Treat them as an active participant. Give real practical advice.
-Ask about their actual results. Help them make the next move."""
+            stage_instr = f"""SUBSCRIBED — {ftd_count} deposit(s) done.
+Goals: keep active, optimize strategy, push toward repeat deposit.
+Give real practical advice. Ask about actual results. Make next action obvious."""
         else:
-            stage_instr = f"""SUBSCRIBED — user hasn't deposited yet.
-Goal: FIRST DEPOSIT. Every reply moves toward this.
-Be specific about what they're missing. Don't be soft.
-Make inaction feel expensive, action feel obvious.
-Address their specific words — don't repeat yourself."""
+            stage_instr = f"""SUBSCRIBED — no deposit yet.
+Goal: FIRST DEPOSIT. Every single reply moves toward this.
+Be specific about what they're missing right now.
+Make inaction feel expensive. Action feel obvious.
+Address their exact words. Never repeat yourself."""
 
-    system = f"""You are Valeria — private AI companion for betting and bonuses.
-You are having a REAL CONVERSATION. Not running a script. Not a chatbot.
+    system = f"""You are Valeria — private insider for betting signals and bonus math.
+You're texting someone 1-on-1 on Telegram. Real conversation. Not a bot script.
 
-LANGUAGE: {language} — write ONLY in this language. Detect from context, never ask.
+LANGUAGE: {language} — write ONLY in this language, always. Detect from their messages. Never ask.
 INTEREST: {interest_ctx}
-GEO context: {effective_geo}
+GEO: {effective_geo}
 PSYCHOTYPE: {psychotype_instr}
 {_build_obj_summary(objections)}
 {_build_profile_ctx(user_profile)}
 {search_section}
 
-STAGE: {stage_instr}
+━━━ STAGE ━━━
+{stage_instr}
 
-━━━ CONVERSATION RULES ━━━
-- GIVE VALUE first, ask ONE question after. Never reverse this.
-- Mirror their energy: short reply → short + punchy. Long → match depth.
-- If they show buying intent (money, deposit, how to) → move to tease FAST
-- If they're vague → give an insight that makes them want more, then ask
-- NEVER run an interview. You're an insider sharing intel, not a form.
-- NEVER repeat your previous message or question.
-- NEVER close conversation. NEVER say goodbye.
-- Max 3 sentences. *bold* 1 key fact/number. 1 emoji max.
+━━━ FORMAT ━━━
+• 2-3 short sentences max. This is Telegram, not email.
+• *bold* exactly one key fact or number per message.
+• Max 1 emoji. Zero if they use zero.
+• Short answer from them → short punchy reply from you. Never write more than their message x3 in length.
 
-━━━ FORBIDDEN ━━━
-- Never ask 2 questions in a row without giving value
-- Never say "I'm an AI" or reference being a bot
-- Never promise profits or guaranteed results
-- Never invent specific match names, exact odds without real data
-- Never sound like a survey: "What sport do you follow?" with no context
-- Never start with "Great!", "Awesome!", "Interesting!"
+━━━ VOICE ━━━
+• Insider sharing intel — not a salesperson pitching.
+• Dry and direct. Warmth ok. Hype forbidden.
+• Never: "Great!", "Awesome!", "Interesting!", "Of course!", "Sure!"
+• Never: reference being AI, a bot, or following a script.
+• Never: promise profits, guaranteed results, or specific ROI.
+• Never: invent team names, exact odds, or real bonus codes without data.
 
-━━━ HIDDEN TAGS (invisible to user, on own line at END) ━━━
-[READY:warming]  — interest confirmed, move to warming
-[READY:tease]    — value given, curiosity built, ready to tease
-[INTEREST:xxx]   — detected interest (betting/casino/nodeposit/exclusive)
-[GEO:xx]         — detected geo (ES/HR/RS/LT/LV)"""
+━━━ HIDDEN TAGS ━━━
+Place on their own line at the very END of your message. Never mid-text.
+[READY:warming]  — signal detected, moving to warming
+[READY:tease]    — gap created, time to show the channel
+[INTEREST:xxx]   — betting / casino / nodeposit / exclusive
+[GEO:xx]         — ES / HR / RS / LT / LV"""
 
     try:
         clean_history = _sanitize_history(history[-14:])
@@ -357,12 +371,12 @@ STAGE: {stage_instr}
         raw = _fallback_response(lang, effective_interest, funnel_stage)
 
     # Парсим скрытые теги
-    next_stage        = None
-    tag_interest      = None
-    tag_geo           = None
+    next_stage   = None
+    tag_interest = None
+    tag_geo      = None
 
     if m := re.search(r"\[READY:(\w+)\]", raw):
-        next_stage = m.group(1)  # "warming" или "tease"
+        next_stage = m.group(1)
     raw = re.sub(r"\[READY:\w+\]", "", raw).strip()
 
     if m := re.search(r"\[INTEREST:(\w+)\]", raw):
@@ -385,13 +399,12 @@ STAGE: {stage_instr}
         "detected_geo":      tag_geo or detected_geo,
         "next_stage":        next_stage,
         "move_to_tease":     next_stage == "tease",
-        "move_to_cta":       False,  # tease → CTA через _send_tease в bot.py
+        "move_to_cta":       False,
     }
 
 
 # ════════════════════════════════════════════════════════════════════════════
-#  POST-SUBSCRIPTION OPENER — первое что Валерия пишет подписавшемуся
-#  Не "Well done" — живой вопрос который начинает диалог
+#  POST-SUBSCRIPTION OPENER
 # ════════════════════════════════════════════════════════════════════════════
 
 _POST_SUB_OPENERS: dict[str, dict[str, str]] = {
@@ -428,20 +441,17 @@ _POST_SUB_OPENERS: dict[str, dict[str, str]] = {
 }
 
 def get_post_sub_opener(lang: str, interest: str) -> str:
-    """Первый вопрос Валерии после подписки — начинает диалог, не рассылку."""
     lang_openers = _POST_SUB_OPENERS.get(lang, _POST_SUB_OPENERS["en"])
     return lang_openers.get(interest, lang_openers.get("betting", ""))
 
 
 # ════════════════════════════════════════════════════════════════════════════
-#  SILENCE DETECTOR — один точечный пуш если молчат
-#  Не серия таймеров. Один умный пуш через N часов молчания.
+#  SILENCE DETECTOR
 # ════════════════════════════════════════════════════════════════════════════
 
 from datetime import datetime, timezone
 
 def hours_since_last_message(user_id: int) -> float:
-    """Сколько часов прошло с последнего сообщения пользователя."""
     from storage import get_user
     user = get_user(user_id)
     last_str = user.get("last_user_message_at", user.get("last_active", ""))
@@ -456,15 +466,10 @@ def hours_since_last_message(user_id: int) -> float:
         return 999
 
 def should_send_silence_push(user_id: int, silence_hours: float = 4.0) -> bool:
-    """
-    Отправлять ли тихий пуш?
-    Да если: молчат > N часов И ещё не отправляли пуш за это молчание.
-    """
     from storage import get_user
     hours = hours_since_last_message(user_id)
     if hours < silence_hours:
         return False
-
     user = get_user(user_id)
     last_push_str = user.get("last_push_at", "")
     if not last_push_str:
@@ -473,7 +478,6 @@ def should_send_silence_push(user_id: int, silence_hours: float = 4.0) -> bool:
         lp = datetime.fromisoformat(last_push_str)
         if lp.tzinfo is None:
             lp = lp.replace(tzinfo=timezone.utc)
-        # Не спамим — минимум silence_hours между пушами
         hours_since_push = (datetime.now(timezone.utc) - lp).total_seconds() / 3600
         return hours_since_push >= silence_hours
     except Exception:
@@ -481,10 +485,10 @@ def should_send_silence_push(user_id: int, silence_hours: float = 4.0) -> bool:
 
 
 # ════════════════════════════════════════════════════════════════════════════
-#  SILENCE PUSH GENERATOR — один вопрос, не монолог
+#  SILENCE PUSH GENERATOR
 # ════════════════════════════════════════════════════════════════════════════
 
-_SILENCE_PUSH: dict[str, dict[str, str]] = {
+_SILENCE_PUSH: dict[str, dict[str, list]] = {
     "pre_ftd": {
         "en": [
             "Still thinking things over? What's the one question you still have?",
@@ -544,8 +548,7 @@ _SILENCE_PUSH: dict[str, dict[str, str]] = {
 import random
 
 def get_silence_push(lang: str, ftd_done: bool) -> str:
-    """Возвращает случайный точечный пуш для молчащего пользователя."""
-    key   = "post_ftd" if ftd_done else "pre_ftd"
-    texts = _SILENCE_PUSH.get(key, _SILENCE_PUSH["pre_ftd"])
+    key     = "post_ftd" if ftd_done else "pre_ftd"
+    texts   = _SILENCE_PUSH.get(key, _SILENCE_PUSH["pre_ftd"])
     options = texts.get(lang, texts.get("en", ["Still there?"]))
     return random.choice(options)
