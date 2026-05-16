@@ -11,6 +11,7 @@ from storage import (get_user, update_user, add_ai_message, mark_push_sent,
                      get_profile, get_ai_history, get_psychotype, get_objections)
 from ai_agent import (_post_with_retry, _build_profile_ctx, _build_obj_summary,
                       ANTHROPIC_URL, MODEL, ANTHROPIC_KEY, _sanitize_history)
+from conversation_analyzer import build_conversation_context
 
 logger = logging.getLogger(__name__)
 BARRIERS = ("no_money","no_trust","dont_understand","not_urgent","already_elsewhere","thinking","unknown")
@@ -67,11 +68,12 @@ async def detect_ftd_ai(user_text: str, history: list, lang: str) -> bool:
     except Exception: return False
 
 # ── Base AI generator ─────────────────────────────────────────────────────────
-def _base_system(lang,interest,psychotype,user_profile,objections,extra="") -> str:
+def _base_system(lang,interest,psychotype,user_profile,objections,extra="",history=None) -> str:
     lang_names={"en":"English","es":"Spanish (Spain, tú)","hr":"Croatian","lt":"Lithuanian","lv":"Latvian"}
     language=lang_names.get(lang,"English")
     ic={"betting":"sports betting, value bets, line movements","casino":"casino bonuses, wagering math, RTP, cashback","nodeposit":"no-deposit bonuses, zero-risk first step","exclusive":"arbitrage, value bets, bonus EV"}.get(interest,"betting & bonuses")
     pi={"cynic":"Only verifiable facts. No claims.","skeptic":"Specific numbers, social proof.","passive":"One tiny step. No pressure.","curious":"Real depth, insight. Pull toward action.","neutral":"Hook → gap → first move."}.get(psychotype,"Direct and useful.")
+    conversation_ctx = build_conversation_context(history or [])
     return f"""You are Valeria — private insider for betting signals and bonus math.
 User just joined your channel. Goal: their first deposit → repeat deposits.
 LANGUAGE: {language} ONLY. Never switch languages, never ask which language to use.
@@ -79,6 +81,7 @@ INTEREST: {ic}
 PSYCHOTYPE: {pi}
 {_build_obj_summary(objections)}
 {_build_profile_ctx(user_profile)}
+{conversation_ctx}
 {extra}
 
 SHORT ANSWER RULE (critical):
@@ -231,35 +234,35 @@ def _fb(key, lang, interest=None, barrier=None):
 # ── Step generators ───────────────────────────────────────────────────────────
 async def generate_step1(lang,interest,psychotype,user_profile,history,objections) -> str:
     extra="STEP 1: Break down HOW the channel benefits them. Real math. End with ONE personal question."
-    return await _generate(_base_system(lang,interest,psychotype,user_profile,objections,extra),history=history) or _fb("step1",lang,interest)
+    return await _generate(_base_system(lang,interest,psychotype,user_profile,objections,extra,history=history),history=history) or _fb("step1",lang,interest)
 
 async def generate_step2(lang,interest,psychotype,user_profile,history,objections,barrier) -> str:
     extra=f"STEP 2: Address barrier '{barrier}'. Meet them where they are. No high pressure."
-    return await _generate(_base_system(lang,interest,psychotype,user_profile,objections,extra),history=history) or _fb("barrier",lang,interest,barrier)
+    return await _generate(_base_system(lang,interest,psychotype,user_profile,objections,extra,history=history),history=history) or _fb("barrier",lang,interest,barrier)
 
 async def generate_step3(lang,interest,psychotype,user_profile,history,objections,barrier) -> str:
     extra=f"STEP 3: Social proof for barrier '{barrier}'. Specific relatable story. End with question."
-    return await _generate(_base_system(lang,interest,psychotype,user_profile,objections,extra),history=history) or _fb("step3",lang)
+    return await _generate(_base_system(lang,interest,psychotype,user_profile,objections,extra,history=history),history=history) or _fb("step3",lang)
 
 async def generate_step4(lang,interest,psychotype,user_profile,history,objections,barrier) -> str:
     extra="STEP 4: Final push. Specific deadline. Respectful. Leave door open."
-    return await _generate(_base_system(lang,interest,psychotype,user_profile,objections,extra),history=history) or _fb("step4",lang)
+    return await _generate(_base_system(lang,interest,psychotype,user_profile,objections,extra,history=history),history=history) or _fb("step4",lang)
 
 async def generate_step5(lang,interest,psychotype,user_profile,history,objections,barrier) -> str:
     extra="STEP 5: Fresh angle, 24h later. Don't repeat previous arguments. New hook."
-    return await _generate(_base_system(lang,interest,psychotype,user_profile,objections,extra),history=history) or _fb("step5",lang,interest)
+    return await _generate(_base_system(lang,interest,psychotype,user_profile,objections,extra,history=history),history=history) or _fb("step5",lang,interest)
 
 async def generate_step6(lang,interest,psychotype,user_profile,history,objections,barrier) -> str:
     extra="STEP 6: Before switching to maintenance mode. Ask what would make first step feel obvious."
-    return await _generate(_base_system(lang,interest,psychotype,user_profile,objections,extra),history=history) or _fb("step6",lang)
+    return await _generate(_base_system(lang,interest,psychotype,user_profile,objections,extra,history=history),history=history) or _fb("step6",lang)
 
 async def generate_ftd_celebration(lang,interest,psychotype,user_profile,history) -> str:
     extra="FTD CELEBRATION: 1 sentence celebration, then immediately pivot to concrete next step. Ask about their specific situation."
-    return await _generate(_base_system(lang,interest,psychotype,user_profile,{},extra),history=history) or _fb("celebration",lang,interest)
+    return await _generate(_base_system(lang,interest,psychotype,user_profile,{},extra,history=history),history=history) or _fb("celebration",lang,interest)
 
 async def generate_repeat_push(step,lang,interest,psychotype,user_profile,history,ftd_count) -> str:
     extra=f"REPEAT FTD step={step}, ftd_count={ftd_count}. Practical advice for active user. Ask about real results."
-    return await _generate(_base_system(lang,interest,psychotype,user_profile,{},extra),history=history) or _fb("repeat",lang,interest,step)
+    return await _generate(_base_system(lang,interest,psychotype,user_profile,{},extra,history=history),history=history) or _fb("repeat",lang,interest,step)
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 def _user_active_since(user_id,since_ts):
