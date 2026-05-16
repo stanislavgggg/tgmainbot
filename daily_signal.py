@@ -28,7 +28,7 @@ from typing import Optional
 from telegram.error import TelegramError
 from telegram.constants import ParseMode
 
-from storage import get_all_users, get_user, add_ai_message, mark_push_sent, get_profile, get_ai_history, get_objections, get_psychotype
+from storage import get_all_users, get_user, add_ai_message, mark_push_sent, get_profile, get_ai_history, get_objections, get_psychotype, update_user_no_active
 from ai_agent import _post_with_retry, _build_profile_ctx, ANTHROPIC_URL, MODEL, ANTHROPIC_KEY, _safe_web_search, _fallback_response
 
 logger = logging.getLogger(__name__)
@@ -246,8 +246,6 @@ async def daily_signal_job(context) -> None:
     """
     Запускается каждый час. Отправляет сигнал пользователям у которых сейчас 17–19 по локальному времени.
     """
-    from storage import update_user as _update_user
-
     users = get_all_users()
     sent_count = 0
 
@@ -309,7 +307,7 @@ async def daily_signal_job(context) -> None:
             await context.bot.send_message(
                 chat_id=user_id, text=text, parse_mode=ParseMode.MARKDOWN)
             add_ai_message(user_id, "assistant", text)
-            _update_user(user_id, last_daily_signal=datetime.now(timezone.utc).isoformat())
+            update_user_no_active(user_id, last_daily_signal=datetime.now(timezone.utc).isoformat())
             mark_push_sent(user_id)
             sent_count += 1
             logger.info(f"Daily signal → {user_id} [{lang}/{interest}]")
