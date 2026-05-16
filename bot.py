@@ -169,6 +169,8 @@ HOOK_IMAGE_PATH = os.path.join(os.path.dirname(__file__), "1name.png")
 HOOK_IMAGE_URL  = "https://raw.githubusercontent.com/stanislavgggg/tgmainbot/4891019e49ee730aad0db5bcd065708a1b44c471/1name.png"
 WELCOME_IMAGE_PATH = os.path.join(os.path.dirname(__file__), "welcome_subscribed.png")
 WELCOME_IMAGE_URL  = "https://raw.githubusercontent.com/stanislavgggg/tgmainbot/1e916335c4d9b7c4e6bc93ccc2377321f8484b39/ChatGPT%20Image%20May%2016%2C%202026%2C%2004_25_15%20PM.png"
+NOT_MEMBER_IMAGE_PATH = os.path.join(os.path.dirname(__file__), "not_member.png")
+NOT_MEMBER_IMAGE_URL  = "https://raw.githubusercontent.com/stanislavgggg/tgmainbot/ed3732f7c714f2c9ae601743f870c99b0485e58d/ChatGPT%20Image%20May%2016%2C%202026%2C%2004_46_05%20PM.png"
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id    = update.effective_user.id
@@ -279,10 +281,32 @@ async def user_joined(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "lt": "Hmm, atrodo dar neprisijungei. Prisijunk pirmiausia ir grįžk čia. 👇",
             "lv": "Hmm, izskatās ka vēl neesi iekšā. Pievienojies vispirms un atgriezies. 👇",
         }
-        await context.bot.send_message(
-            chat_id=chat_id, text=not_yet.get(lang, not_yet["en"]),
-            parse_mode=ParseMode.MARKDOWN,
-            reply_markup=_cta_keyboard(lang, interest, geo))
+        not_yet_text = not_yet.get(lang, not_yet["en"])
+        not_member_sent = False
+        if os.path.exists(NOT_MEMBER_IMAGE_PATH):
+            try:
+                with open(NOT_MEMBER_IMAGE_PATH, "rb") as photo:
+                    await context.bot.send_photo(
+                        chat_id=chat_id, photo=photo,
+                        caption=not_yet_text, parse_mode=ParseMode.MARKDOWN,
+                        reply_markup=_cta_keyboard(lang, interest, geo))
+                not_member_sent = True
+            except TelegramError as e:
+                logger.warning(f"Not-member photo file failed: {e}")
+        if not not_member_sent:
+            try:
+                await context.bot.send_photo(
+                    chat_id=chat_id, photo=NOT_MEMBER_IMAGE_URL,
+                    caption=not_yet_text, parse_mode=ParseMode.MARKDOWN,
+                    reply_markup=_cta_keyboard(lang, interest, geo))
+                not_member_sent = True
+            except TelegramError as e:
+                logger.warning(f"Not-member photo URL failed: {e}")
+        if not not_member_sent:
+            await context.bot.send_message(
+                chat_id=chat_id, text=not_yet_text,
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=_cta_keyboard(lang, interest, geo))
         return
 
     # Fix: сбрасываем ai_msg_count при подписке — иначе юзер попадает в step3/4
