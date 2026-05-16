@@ -282,15 +282,25 @@ Goals: keep active, optimize strategy, push toward repeat deposit.
 Give real practical advice. Ask about actual results. Make next action obvious.
 MAX 3 sentences."""
         else:
-            stage_instr = """SUBSCRIBED — no deposit yet. Goal: FIRST DEPOSIT.
+            stage_instr = f"""SUBSCRIBED — no deposit yet. Goal: FIRST DEPOSIT.
 
-Every reply moves toward this. One step at a time.
+THE FUNNEL IS: join channel → read pinned post → register via channel link → make first deposit.
+The user is already IN the channel. Next step = deposit via the product in the pinned post.
+
+━━━ CONCRETE NEXT ACTION ━━━
+{f"Product to push: {product_context.split('PRODUCT TO RECOMMEND:')[1].split(chr(10))[0].strip() if 'PRODUCT TO RECOMMEND:' in product_context else 'the offer in the channel pinned post'}"}.
+The CTA is: "check the pinned post in the channel → click the link → register/deposit".
+Make THIS feel like the obvious next step — not a generic "check the channel".
 
 ━━━ RULES ━━━
-• MAX 2 sentences. Hard limit. Never exceed.
-• They ask HOW → answer 30% → "the signals cover the rest, check the channel."
-• Make inaction feel expensive in one concrete sentence.
-• Make the next action feel obvious and small."""
+• MAX 2 sentences. Hard limit.
+• Reference the SPECIFIC product or offer from the channel context if available.
+• Make inaction feel expensive: "the window is open now, not tomorrow."
+• Make the deposit step feel tiny: "takes 3 minutes, €10 minimum."
+• If they ask HOW → answer 30% → "the pinned post in the channel has the full setup."
+• NEVER ask questions about their experience level, platform, or preferences — that's done.
+• NEVER ask "sports or casino?" or "betting or bonus?" — already known.
+• One move only: check pinned post → register → deposit. Repeat this in different words."""
 
     system = f"""You are Valeria — private insider for betting signals and bonus math.
 You're texting someone 1-on-1 on Telegram. Real conversation. Not a bot script.
@@ -329,7 +339,7 @@ PSYCHOTYPE: {psychotype_instr}
 [GEO:xx]         — ES / HR / RS / LT / LV"""
 
     try:
-        clean_history = _sanitize_history(history[-14:])
+        clean_history = _sanitize_history(history[-24:])
         messages = clean_history + [{"role": "user", "content": user_message}]
 
         data = await _post_with_retry(
@@ -488,17 +498,45 @@ _POST_SUB_C: dict[str, dict[str, str]] = {
 
 def get_post_sub_opener(lang: str, interest: str, ab_variant: str = "A") -> str:
     """
-    CRO #4: A/B тест post-sub онбординга.
-    ab_variant из user["ab_variant"], передаётся из bot.py/user_joined.
+    CRO #4: Post-sub первое сообщение.
+    Все варианты теперь ведут к одному действию: открыть закреп → кликнуть ссылку → депозит.
+    Вопросы про опыт/платформу ЗАПРЕЩЕНЫ — это уже выяснено до подписки.
     """
-    if ab_variant == "B":
-        table = _POST_SUB_B
-    elif ab_variant == "C":
-        table = _POST_SUB_C
-    else:
-        table = _POST_SUB_A
+    # Единый набор — конкретный следующий шаг
+    _OPENERS: dict[str, dict[str, str]] = {
+        "en": {
+            "betting":   "You're in. *Open the pinned post in the channel* — it has the current signal format and the registration link. Takes 2 minutes to set up.",
+            "casino":    "You're in. *Check the pinned post* — it shows the active bonus offer with exact wagering terms and the link to register. Start there.",
+            "nodeposit": "You're in. *The pinned post has 2 active no-deposit offers* — zero of your own money, real upside. Click the link in the pinned post and register.",
+            "exclusive": "You're in. *Pinned post has both the signal format and the bonus stacking setup.* Read that first, then hit the registration link.",
+        },
+        "es": {
+            "betting":   "Ya estás dentro. *Abre el mensaje fijado en el canal* — tiene el formato de señal actual y el enlace de registro. Son 2 minutos.",
+            "casino":    "Ya estás dentro. *Revisa el mensaje fijado* — muestra la oferta de bono activa con los términos exactos de wagering y el enlace para registrarte.",
+            "nodeposit": "Ya estás dentro. *El mensaje fijado tiene 2 ofertas sin depósito activas* — sin dinero propio, upside real. Haz clic en el enlace del fijado y regístrate.",
+            "exclusive": "Ya estás dentro. *El fijado tiene el formato de señal y el setup de bonus stacking.* Lee eso primero, luego usa el enlace de registro.",
+        },
+        "hr": {
+            "betting":   "Unutra si. *Otvori prikvačenu poruku u kanalu* — ima trenutni format signala i link za registraciju. Traje 2 minute.",
+            "casino":    "Unutra si. *Provjeri prikvačenu poruku* — pokazuje aktivnu bonus ponudu s točnim uvjetima wageringa i link za registraciju.",
+            "nodeposit": "Unutra si. *Prikvačena poruka ima 2 aktivne ponude bez depozita* — nula tvog novca, pravi potencijal. Klikni link i registriraj se.",
+            "exclusive": "Unutra si. *Prikvačena ima format signala i setup za bonus stacking.* Pročitaj to prvo, zatim koristi link za registraciju.",
+        },
+        "lt": {
+            "betting":   "Esi viduje. *Atidaro prisegtą žinutę kanale* — joje dabartinis signalo formatas ir registracijos nuoroda. Užtrunka 2 minutes.",
+            "casino":    "Esi viduje. *Patikrink prisegtą žinutę* — rodo aktyvų bonuso pasiūlymą su tiksliais wagering sąlygomis ir registracijos nuoroda.",
+            "nodeposit": "Esi viduje. *Prisegtoje žinutėje yra 2 aktyvūs be depozito pasiūlymai* — nulis savo pinigų, realus potencialas. Spausk nuorodą ir registruokis.",
+            "exclusive": "Esi viduje. *Prisegta turi signalo formatą ir bonusų stacking setup.* Perskaityk tai pirma, tada naudok registracijos nuorodą.",
+        },
+        "lv": {
+            "betting":   "Esi iekšā. *Atver piesaistīto ziņu kanālā* — tajā ir pašreizējais signāla formāts un reģistrācijas saite. Aizņem 2 minūtes.",
+            "casino":    "Esi iekšā. *Pārbaudi piesaistīto ziņu* — tā rāda aktīvo bonusa piedāvājumu ar precīziem wagering nosacījumiem un reģistrācijas saiti.",
+            "nodeposit": "Esi iekšā. *Piesaistītajā ziņā ir 2 aktīvi bez depozīta piedāvājumi* — nulle savas naudas, reāls potenciāls. Noklikšķini uz saites un reģistrējies.",
+            "exclusive": "Esi iekšā. *Piesaistītā ziņā ir signāla formāts un bonusu stacking setup.* Izlasi to vispirms, tad izmanto reģistrācijas saiti.",
+        },
+    }
 
-    lang_data = table.get(lang, table.get("en", {}))
+    lang_data = _OPENERS.get(lang, _OPENERS.get("en", {}))
     return lang_data.get(interest, lang_data.get("betting", ""))
 
 
