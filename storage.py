@@ -42,10 +42,23 @@ def get_user(user_id: int) -> dict:
     with _lock: return dict(_users.get(user_id, {}))
 
 def update_user(user_id: int, **kwargs) -> None:
+    """Обновляет поля пользователя И обновляет last_active."""
     with _lock:
         user = _users.setdefault(user_id, {"id": user_id})
         user.update(kwargs)
         user["last_active"] = datetime.now(timezone.utc).isoformat()
+        _save()
+
+def update_user_no_active(user_id: int, **kwargs) -> None:
+    """
+    Обновляет поля пользователя БЕЗ обновления last_active.
+    Используется в job-ах (reengage_job, subscribed_push_job) чтобы
+    не сбивать счётчик молчания пользователя — иначе job будет видеть
+    'свежую' last_active и не отправит следующий угол через нужное время.
+    """
+    with _lock:
+        user = _users.setdefault(user_id, {"id": user_id})
+        user.update(kwargs)
         _save()
 
 def mark_push_sent(user_id: int) -> None:
