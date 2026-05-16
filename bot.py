@@ -61,39 +61,39 @@ _check_lock()
 # ── Reengage angles — 5 углов атаки по очереди ───────────────────────────────
 _REENGAGE_ANGLES: dict[str, list[str]] = {
     "en": [
-        "Still around? How did you end up finding this in the first place?",
+        "Still around? What made you curious about this in the first place?",
         "*Sharp money moved before the line shifted* — 15-minute window most people miss. Still relevant to you?",
-        "Quick one — you more of a sports person or casino?",
         "Most people who find this got burned going it alone first. That the case for you?",
-        "Last one from me — what's the one thing that would actually make this worth looking at?",
+        "What's the one thing that's still not clicking for you about this?",
+        "Last one from me — what would actually make the first step feel obvious?",
     ],
     "es": [
-        "¿Sigues por aquí? ¿Cómo terminaste encontrando esto?",
-        "*El dinero sharp se movió antes de que la cuota cambiara* — ventana de 15 minutos que la mayoría pierde. ¿Sigue siendo relevante para ti?",
-        "Rápido — ¿eres más de deportes o casino?",
+        "¿Sigues por aquí? ¿Qué te hizo curioso sobre esto al principio?",
+        "*El dinero sharp se movió antes de que la cuota cambiara* — ventana de 15 minutos que la mayoría pierde. ¿Sigue siendo relevante?",
         "La mayoría que llega aquí se quemó yendo solo primero. ¿Ese es tu caso?",
-        "La última de mi parte — ¿qué haría que realmente valiera la pena echar un vistazo?",
+        "¿Qué es lo que todavía no termina de encajar para ti?",
+        "La última de mi parte — ¿qué haría que el primer paso pareciera obvio?",
     ],
     "hr": [
-        "Jesi li još tu? Kako si uopće završio pronalazeći ovo?",
-        "*Novac se pomaknuo prije nego što se kvota promijenila* — 15-minutni prozor koji većina propušta. Je li još relevantno za tebe?",
-        "Kratko — jesi više sports tip ili casino?",
+        "Jesi li još tu? Što te je u početku zainteresiralo za ovo?",
+        "*Novac se pomaknuo prije nego što se kvota promijenila* — 15-minutni prozor koji većina propušta. Je li još relevantno?",
         "Većina koji nađu ovo prvo su se opekli idući sami. Je li to tvoj slučaj?",
-        "Zadnje od mene — što bi zapravo učinilo da vrijedi pogledati?",
+        "Što je to što ti još nije jasno u svemu ovome?",
+        "Zadnje od mene — što bi učinilo da prvi korak izgleda očito?",
     ],
     "lt": [
-        "Vis dar čia? Kaip apskritai radai šitą?",
+        "Vis dar čia? Kas tave iš pradžių sudomino šituo?",
         "*Pinigai pajudėjo prieš koeficientui pasikeičiant* — 15 minučių langas kurį dauguma praleidžia. Vis dar aktualu?",
-        "Greitai — esi labiau sporto ar kazino žmogus?",
         "Dauguma kurie randa šitą pirmiausia nudegė eidami vieni. Ar tavo atvejis?",
-        "Paskutinis iš manęs — kas tikrai privertų tai verta pažiūrėti?",
+        "Kas vis dar nėra aišku tau apie visa tai?",
+        "Paskutinis iš manęs — kas privertų pirmą žingsnį atrodyti akivaizdžiai?",
     ],
     "lv": [
-        "Vēl esi šeit? Kā tu vispār atradi šito?",
+        "Vēl esi šeit? Kas tevi sākotnēji ieinteresēja par šito?",
         "*Nauda pakustējās pirms koeficients mainījās* — 15 minūšu logs ko vairākums palaiž garām. Vēl aktuāli?",
-        "Ātri — tu esi vairāk sporta vai kazino cilvēks?",
         "Vairākums kas atrod šito vispirms apdedzinājās ejot vieni. Vai tā ir tava situācija?",
-        "Pēdējais no manis — kas tiešām liktu to vērts apskatīt?",
+        "Kas ir tas kas tev vēl nav skaidrs visā šajā?",
+        "Pēdējais no manis — kas liktu pirmajam solim izskatīties acīmredzamam?",
     ],
 }
 
@@ -636,6 +636,7 @@ async def _handle_ai_chat(update, context, user_id, lang, interest, geo, user_te
     new_msg_count = msg_count + 1
     update_user(user_id, ai_msg_count=new_msg_count,
                 last_user_message_at=datetime.now(timezone.utc).isoformat())
+    logger.info(f"_handle_ai_chat user={user_id} msg_count={new_msg_count} history_len={len(history)} barrier={user.get('onboarding_barrier','?')}")
     await context.bot.send_chat_action(chat_id, "typing")
 
     # ── S16/S17: Win/Loss (post-FTD) ─────────────────────────────────────────
