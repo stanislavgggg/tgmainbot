@@ -183,6 +183,15 @@ async def ask_valeria_conversational(
             "\nGeneral patterns and mechanisms only. Zero invented specifics."
         )
 
+    # Контекст продукта из канала — только реальные данные
+    from product_selector import build_product_context
+    product_context = build_product_context(
+        geo=effective_geo,
+        interest=effective_interest,
+        funnel_stage=funnel_stage,
+        ftd_done=ftd_done,
+    )
+
     # ── Conversation analysis (Belfort personalization) ───────────────────
     conversation_ctx = build_conversation_context(history)
 
@@ -293,6 +302,7 @@ PSYCHOTYPE: {psychotype_instr}
 {_build_obj_summary(objections)}
 {_build_profile_ctx(user_profile)}
 {search_section}
+{f"══ CHANNEL & PRODUCT CONTEXT ══{chr(10)}{product_context}" if product_context else ""}
 
 {conversation_ctx}
 
