@@ -181,6 +181,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     tg_lang    = update.effective_user.language_code
     chat_id    = update.effective_chat.id
 
+    # Отправляем typing сразу — пользователь видит реакцию мгновенно
+    await context.bot.send_chat_action(chat_id, "typing")
+
     start_param = context.args[0] if context.args else ""
     if start_param:
         referrer_id = get_referrer_from_start(start_param)
@@ -199,8 +202,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         geo      = existing.get("geo", geo_hint)
         opener   = get_returning_opener(lang)
         logger.info(f"RETURNING user={user_id} prev_stage={prev_stage}")
-        await context.bot.send_chat_action(chat_id, "typing")
-        await asyncio.sleep(1.2)
+        await asyncio.sleep(0.8)
         await context.bot.send_message(
             chat_id=chat_id, text=opener, parse_mode=ParseMode.MARKDOWN)
         if prev_stage == "subscribed":
@@ -213,6 +215,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # ── Новый пользователь ────────────────────────────────────────────────────
     variant = assign_variant()
+    # Один update_user — убираем дублирующий вызов в конце
     update_user(user_id,
         state=State.WARM1, funnel_stage="discovery",
         first_name=first_name,
@@ -228,8 +231,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"START new user={user_id} lang={lang} geo={geo_hint} variant={variant}")
 
     hook_text = get_hook_text(variant, lang)
-    await asyncio.sleep(0.8)
 
+    # Отправляем фото: сначала пробуем локальный файл (быстро),
+    # потом URL. Короткий таймаут на URL чтобы не вешать старт.
     sent = False
     if os.path.exists(HOOK_IMAGE_PATH):
         try:
@@ -240,20 +244,23 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             sent = True
         except TelegramError as e:
             logger.warning(f"Photo file failed: {e}")
+
     if not sent:
         try:
-            await context.bot.send_photo(
-                chat_id=chat_id, photo=HOOK_IMAGE_URL,
-                caption=hook_text, parse_mode=ParseMode.MARKDOWN)
+            await asyncio.wait_for(
+                context.bot.send_photo(
+                    chat_id=chat_id, photo=HOOK_IMAGE_URL,
+                    caption=hook_text, parse_mode=ParseMode.MARKDOWN),
+                timeout=6.0)
             sent = True
-        except TelegramError as e:
+        except (TelegramError, asyncio.TimeoutError) as e:
             logger.warning(f"Photo URL failed: {e}")
+
     if not sent:
         await context.bot.send_message(
             chat_id=chat_id, text=hook_text, parse_mode=ParseMode.MARKDOWN)
 
     track_event(user_id, "hook_shown")
-    update_user(user_id, state=State.WARM1, funnel_stage="discovery")
 
 
 # ════════════════════════════════════════════════════════════════════════════
