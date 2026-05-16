@@ -8,7 +8,8 @@ bot.py — OddsVault Bot v14
   - FTD celebration + repeat machine
   - Daily signal, Adrenaline mode, A/B тест, Bonus calculator, Referral
 """
-import asyncio, logging, os, random, sys, atexit
+import asyncio, logging, os, random, re, sys, atexit
+from typing import Optional
 from datetime import datetime, timezone
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ParseMode
@@ -132,6 +133,8 @@ async def _send_tease(bot, user_id, chat_id, lang, interest, geo="OTHER", job_qu
 
     # CTA через паузу — только если пользователь не ответил сам
     if job_queue:
+        for job in job_queue.get_jobs_by_name(f"cta_{user_id}"):
+            job.schedule_removal()
         job_queue.run_once(
             _delayed_cta_job, when=8,
             data={"user_id": user_id, "chat_id": chat_id,
@@ -156,7 +159,7 @@ async def _delayed_cta_job(context: ContextTypes.DEFAULT_TYPE):
     await _send_cta(context.bot, user_id, chat_id, lang, interest, geo)
 
 async def _send_cta(bot, user_id, chat_id, lang, interest, geo):
-    update_user(user_id, state=State.CTA, funnel_stage="cta")
+    update_user(user_id, state=State.CTA, funnel_stage="cta", cta_shown=True)
     cta_text = M.CTA_TEXT.get(lang, M.CTA_TEXT.get("en", "🔐 The vault is right there."))
     await bot.send_message(chat_id=chat_id, text=cta_text, parse_mode=ParseMode.MARKDOWN,
                            reply_markup=_cta_keyboard(lang, interest, geo))
@@ -274,6 +277,8 @@ async def user_joined(update: Update, context: ContextTypes.DEFAULT_TYPE):
     status = await check_membership(bot=context.bot, user_id=user_id, geo=geo, interest=interest)
 
     if status == MemberStatus.NOT_MEMBER:
+        # Убеждаемся что cta_shown выставлен — чтобы блокировщик в handle_message работал
+        update_user(user_id, cta_shown=True)
         not_yet = {
             "en": "Hmm, looks like you're not in yet. Join first — then come back here. 👇",
             "es": "Hmm, parece que aún no estás dentro. Únete primero y vuelve aquí. 👇",
@@ -365,20 +370,63 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     interest = user.get("interest", "betting")
     geo      = user.get("geo", "OTHER")
 
-    # Детектор GEO из текста
+    # ── Железное правило подписки: если CTA уже была показана но пользователь
+    # не подписан — блокируем ВСЕ сообщения. Не зависит от state.
+    # Исключение: verified_member=True (уже подтверждён через user_joined).
+    if (user.get("cta_shown") and
+            not user.get("verified_member") and
+            state not in (State.AI_CHAT, State.SUBSCRIBED)):
+        chat_id = update.effective_chat.id
+        not_yet = {
+            "en": "Hmm, looks like you're not in yet. Join first — then come back here. 👇",
+            "es": "Hmm, parece que aún no estás dentro. Únete primero y vuelve aquí. 👇",
+            "hr": "Hmm, čini se da još nisi unutra. Pridruži se prvo i vrati se ovdje. 👇",
+            "lt": "Hmm, atrodo dar neprisijungei. Prisijunk pirmiausia ir grįžk čia. 👇",
+            "lv": "Hmm, izskatās ka vēl neesi iekšā. Pievienojies vispirms un atgriezies. 👇",
+        }
+        not_yet_text = not_yet.get(lang, not_yet["en"])
+        not_member_sent = False
+        if os.path.exists(NOT_MEMBER_IMAGE_PATH):
+            try:
+                with open(NOT_MEMBER_IMAGE_PATH, "rb") as photo:
+                    await context.bot.send_photo(
+                        chat_id=chat_id, photo=photo,
+                        caption=not_yet_text, parse_mode=ParseMode.MARKDOWN,
+                        reply_markup=_cta_keyboard(lang, interest, geo))
+                not_member_sent = True
+            except TelegramError as e:
+                logger.warning(f"Not-member reminder photo failed: {e}")
+        if not not_member_sent:
+            try:
+                await context.bot.send_photo(
+                    chat_id=chat_id, photo=NOT_MEMBER_IMAGE_URL,
+                    caption=not_yet_text, parse_mode=ParseMode.MARKDOWN,
+                    reply_markup=_cta_keyboard(lang, interest, geo))
+                not_member_sent = True
+            except TelegramError as e:
+                logger.warning(f"Not-member reminder photo URL failed: {e}")
+        if not not_member_sent:
+            await context.bot.send_message(
+                chat_id=chat_id, text=not_yet_text,
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=_cta_keyboard(lang, interest, geo))
+        return
+
+    # Детектор GEO из текста — обновляем только geo, NOT lang.
+    # Язык уже определён из Telegram lang_code при /start.
+    # Принудительная смена языка только через _detect_lang_switch.
     if geo in ("OTHER", ""):
         detected_geo = detect_geo_from_text(user_text)
         if detected_geo and detected_geo != geo:
-            new_lang = resolve_lang(detected_geo)
-            update_user(user_id, geo=detected_geo, lang=new_lang)
-            geo = detected_geo; lang = new_lang
-            logger.info(f"GEO from text: {detected_geo} → lang={new_lang}")
+            update_user(user_id, geo=detected_geo)
+            geo = detected_geo
+            logger.info(f"GEO from text: {detected_geo} (lang kept as {lang})")
 
     # Silent profile update
     if len(user_text) > 8:
         asyncio.create_task(_update_profile_silent(user_id, user_text, lang))
 
-    # Детектор переключения языка
+    # Детектор переключения языка — явное переключение командой
     new_lang = _detect_lang_switch(user_text)
     if new_lang and new_lang != lang:
         update_user(user_id, lang=new_lang); lang = new_lang
@@ -386,6 +434,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                "hr":"Prelazim na hrvatski. 👌","lt":"Pereinu į lietuvių. 👌","lv":"Pāreju uz latviešu. 👌"}
         await update.message.reply_text(ack.get(new_lang, "👌"))
         return
+
+    # Автоопределение языка из содержимого сообщения (только если язык ещё не закреплён)
+    # Срабатывает на первых двух репликах чтобы закрепить язык до того как AI начнёт отвечать
+    if not user.get("lang_locked") and user.get("stage_replies", 0) <= 1:
+        auto_lang = _detect_lang_from_content(user_text)
+        if auto_lang and auto_lang != lang:
+            update_user(user_id, lang=auto_lang, lang_locked=True)
+            lang = auto_lang
+            logger.info(f"Lang auto-detected from content: {auto_lang} for {user_id}")
+        elif auto_lang == lang:
+            update_user(user_id, lang_locked=True)
 
     # Роутинг по состоянию
     if state in (State.WARM1, State.WARM2):
@@ -421,7 +480,47 @@ async def _update_profile_silent(user_id, text, lang):
         logger.debug(f"Profile skip: {e}")
 
 
-def _detect_lang_switch(text: str):
+def _detect_lang_from_content(text: str) -> Optional[str]:
+    """
+    Определяет язык из содержимого сообщения пользователя.
+    Используется для автоматической блокировки языка на первых репликах.
+    Возвращает код языка или None если не определить.
+    """
+    t = text.lower().strip()
+    # Испанский — характерные слова и буквы
+    es_signals = ["hola", "qué", "que", "cómo", "como", "gracias", "sí", "también",
+                  "también", "estoy", "estás", "eres", "tienes", "tengo", "pero",
+                  "porque", "cuando", "donde", "aquí", "para", "con", "por", "del",
+                  "darknet", "guapa", "chica", "amigo", "español"]
+    # Хорватский
+    hr_signals = ["hvala", "dobro", "kako", "gdje", "što", "zašto", "nije", "sam",
+                  "imam", "idem", "mogu", "nema", "bok", "zdravo"]
+    # Литовский
+    lt_signals = ["labas", "kaip", "kodėl", "taip", "ne", "gerai", "ačiū",
+                  "esu", "turiu", "noriu", "geras"]
+    # Латышский
+    lv_signals = ["sveiki", "kā", "labi", "paldies", "jā", "nē", "esmu",
+                  "man", "ir", "var", "labs"]
+
+    # Подсчёт совпадений
+    scores = {"es": 0, "hr": 0, "lt": 0, "lv": 0}
+    words = set(re.findall(r"\w+", t))
+    for w in words:
+        if w in es_signals: scores["es"] += 1
+        if w in hr_signals: scores["hr"] += 1
+        if w in lt_signals: scores["lt"] += 1
+        if w in lv_signals: scores["lv"] += 1
+
+    # Наличие кириллицы → en (бот не работает с русским, но не меняем на другой)
+    if re.search(r'[а-яё]', t):
+        return "en"  # fallback на английский для кириллицы
+
+    best = max(scores, key=lambda k: scores[k])
+    if scores[best] >= 1:
+        return best
+
+    # Если явных маркеров нет — возвращаем None (не меняем язык)
+    return None
     t = text.lower().strip()
     if any(t == p or t.startswith(p) for p in [
         "switch to english", "english please", "speak english",
@@ -548,6 +647,11 @@ async def _handle_tease(update, context, user_id, lang, interest, geo, user_text
     profile    = get_profile(user_id)
     psychotype, objections = _prepare_context(user_id, user_text)[0], get_objections(user_id)
 
+    # Пользователь ответил — инкрементируем stage_replies
+    user = get_user(user_id)
+    replies = user.get("stage_replies", 0) + 1
+    update_user(user_id, stage_replies=replies)
+
     add_ai_message(user_id, "user", user_text)
     history = get_ai_history(user_id)
 
@@ -564,8 +668,21 @@ async def _handle_tease(update, context, user_id, lang, interest, geo, user_text
     await asyncio.sleep(_typing_delay(response) * 0.5)
     await update.message.reply_text(response, parse_mode=ParseMode.MARKDOWN)
 
-    await asyncio.sleep(2.0)
-    await _send_cta(context.bot, user_id, chat_id, lang, interest, geo)
+    # CTA через паузу — даём пользователю ответить, не ломимся сразу
+    # Отменяем предыдущий job если был (например из _send_tease)
+    if context.job_queue:
+        for job in context.job_queue.get_jobs_by_name(f"cta_{user_id}"):
+            job.schedule_removal()
+        context.job_queue.run_once(
+            _delayed_cta_job, when=10,
+            data={"user_id": user_id, "chat_id": chat_id,
+                  "lang": lang, "interest": interest, "geo": geo},
+            name=f"cta_{user_id}")
+    else:
+        await asyncio.sleep(10)
+        fresh = get_user(user_id)
+        if fresh.get("stage_replies", 0) == replies:
+            await _send_cta(context.bot, user_id, chat_id, lang, interest, geo)
 
 
 async def _handle_cta(update, context, user_id, lang, interest, geo, user_text):
@@ -971,15 +1088,13 @@ async def reengage_job(context: ContextTypes.DEFAULT_TYPE):
     """
     S2: Возврат в разговор если человек замолчал до подписки.
 
-    Логика углов атаки:
-    - Берём current_angle из storage — знаем где остановились
-    - Шлём следующий угол по очереди из _REENGAGE_ANGLES
-    - Если дошли до последнего угла — добавляем CTA кнопку
-    - После последнего угла больше не беспокоим
+    Случай A: пользователь вообще не ответил после /start (stage_replies=0).
+      — шлём первый REENGAGE угол без задержки (уже прошло 4+ часов).
+
+    Случай B: пользователь отвечал, потом замолчал до подписки.
+      — обычная логика углов атаки.
 
     ВАЖНО: используем update_user_no_active чтобы не сбивать last_active.
-    Иначе после отправки last_active обновляется, и через 30 минут job снова
-    видит 'свежего' пользователя и шлёт тот же угол повторно.
     """
     now = datetime.now(timezone.utc).timestamp()
 
@@ -988,7 +1103,6 @@ async def reengage_job(context: ContextTypes.DEFAULT_TYPE):
         if not user_id: continue
         if user.get("funnel_stage") not in ("discovery", "warming", "tease", "cta"): continue
 
-        # Не трогаем если уже прошли все углы
         if user.get("reengage_exhausted"): continue
 
         try:
@@ -997,7 +1111,6 @@ async def reengage_job(context: ContextTypes.DEFAULT_TYPE):
             silent_hours = (now - lt.timestamp()) / 3600
         except Exception: continue
 
-        # Минимум 4 часа молчания
         if silent_hours < 4:
             continue
 
@@ -1005,8 +1118,8 @@ async def reengage_job(context: ContextTypes.DEFAULT_TYPE):
         interest = user.get("interest", "betting")
         geo      = user.get("geo", "OTHER")
         funnel   = user.get("funnel_stage", "warming")
+        stage_replies = user.get("stage_replies", 0)
 
-        # Текущий угол атаки — с какого места продолжаем
         current_angle = user.get("current_angle", 0)
         lang_angles   = _REENGAGE_ANGLES.get(lang, _REENGAGE_ANGLES["en"])
         idx           = min(current_angle, len(lang_angles) - 1)
@@ -1032,20 +1145,100 @@ async def reengage_job(context: ContextTypes.DEFAULT_TYPE):
                 chat_id=user_id, text=text,
                 parse_mode=ParseMode.MARKDOWN, reply_markup=kb)
 
-            # Двигаем угол вперёд БЕЗ обновления last_active —
-            # иначе job через 30 минут снова увидит молчание < 4ч и не пошлёт следующий угол
             next_angle = current_angle + 1
             if is_last:
                 update_user_no_active(user_id, current_angle=next_angle,
-                                      reengage_exhausted=True)
-                logger.info(f"Reengage EXHAUSTED angle={idx} → {user_id}")
+                                      reengage_exhausted=True,
+                                      cta_shown=True,
+                                      state=State.CTA, funnel_stage="cta")
+                logger.info(f"Reengage EXHAUSTED angle={idx} [replies={stage_replies}] → {user_id}")
             else:
                 update_user_no_active(user_id, current_angle=next_angle,
                                       reengage_1_sent=True)
-                logger.info(f"Reengage angle={idx} [{funnel}] → {user_id}")
+                logger.info(f"Reengage angle={idx} [{funnel}] [replies={stage_replies}] → {user_id}")
 
         except TelegramError as e:
             logger.warning(f"Reengage [{user_id}]: {e}")
+
+
+async def subscribed_silent_reengage_job(context: ContextTypes.DEFAULT_TYPE):
+    """
+    Bug 4b: Ретаргетинг для subscribed пользователей которые не ответили после post-sub opener.
+    Отдельный job — проверяем через 24 часа после подписки если ai_msg_count == 0.
+    """
+    now = datetime.now(timezone.utc).timestamp()
+
+    for user in get_all_users():
+        user_id = user.get("id")
+        if not user_id: continue
+        if user.get("funnel_stage") != "subscribed": continue
+        if user.get("ftd_done"): continue
+        if user.get("subscribed_reengage_sent"): continue
+
+        # Только если НИ ОДНОГО ответа после подписки
+        if user.get("ai_msg_count", 0) > 0: continue
+
+        try:
+            lt = datetime.fromisoformat(user.get("last_active", ""))
+            if lt.tzinfo is None: lt = lt.replace(tzinfo=timezone.utc)
+            silent_hours = (now - lt.timestamp()) / 3600
+        except Exception: continue
+
+        # Минимум 6 часов молчания после подписки
+        if silent_hours < 6:
+            continue
+
+        lang     = user.get("lang", "en")
+        interest = user.get("interest", "betting")
+
+        # Пуш на закреп — возвращаем к конкретному действию
+        push_texts = {
+            "en": {
+                "betting":   "Still here? The pinned post in the channel has the signal format and registration link — takes 2 minutes. *That's literally the only step between you and the first move.*",
+                "casino":    "One thing before you forget — the pinned post has the active bonus and the link to claim it. *2 minutes, zero commitment.*",
+                "nodeposit": "Quick reminder — pinned post has the free offer with zero deposit needed. *No money required to start.*",
+                "exclusive": "Still haven't checked the pinned post? *Signal format + bonus setup, all in one place.* 2 minutes.",
+            },
+            "es": {
+                "betting":   "¿Sigues ahí? El mensaje fijado del canal tiene el formato de señal y el enlace de registro. *Son literalmente 2 minutos entre tú y el primer movimiento.*",
+                "casino":    "Una cosa antes de que lo olvides — el fijado tiene el bono activo y el enlace. *2 minutos, sin compromiso.*",
+                "nodeposit": "Recordatorio rápido — el fijado tiene la oferta gratis sin depósito. *No se necesita dinero para empezar.*",
+                "exclusive": "¿Todavía no revisaste el fijado? *Formato de señal + setup de bonos, todo en un sitio.* 2 minutos.",
+            },
+            "hr": {
+                "betting":   "Još tu? Prikvačena poruka u kanalu ima format signala i link za registraciju. *Doslovno 2 minute između tebe i prvog poteza.*",
+                "casino":    "Jedna stvar — prikvačena poruka ima aktivni bonus i link. *2 minute, nula obveza.*",
+                "nodeposit": "Kratki podsjetnik — prikvačena poruka ima besplatnu ponudu bez depozita. *Ne treba novac za početak.*",
+                "exclusive": "Još nisi provjerio prikvačenu? *Format signala + bonus setup, sve na jednom mjestu.* 2 minute.",
+            },
+            "lt": {
+                "betting":   "Vis dar čia? Prisegtoje kanalo žinutėje yra signalo formatas ir registracijos nuoroda. *Tiesiogine prasme 2 minutės tarp tavęs ir pirmo žingsnio.*",
+                "casino":    "Vienas dalykas prieš pamiršdamas — prisegtoje yra aktyvus bonusas ir nuoroda. *2 minutės, jokių įsipareigojimų.*",
+                "nodeposit": "Greitas priminimas — prisegtoje yra nemokamas pasiūlymas be depozito. *Nereikia pinigų pradėti.*",
+                "exclusive": "Vis dar nepatikrino prisegtą? *Signalo formatas + bonusų setup, viskas vienoje vietoje.* 2 minutės.",
+            },
+            "lv": {
+                "betting":   "Vēl šeit? Kanāla piesaistītajā ziņā ir signāla formāts un reģistrācijas saite. *Burtiski 2 minūtes starp tevi un pirmo gājienu.*",
+                "casino":    "Viena lieta pirms aizmirsti — piesaistītajā ir aktīvais bonuss un saite. *2 minūtes, bez saistībām.*",
+                "nodeposit": "Ātrais atgādinājums — piesaistītajā ir bezmaksas piedāvājums bez depozīta. *Nav nepieciešama nauda lai sāktu.*",
+                "exclusive": "Vēl neesat pārbaudījis piesaistīto? *Signāla formāts + bonusu setup, viss vienā vietā.* 2 minūtes.",
+            },
+        }
+
+        lang_texts = push_texts.get(lang, push_texts["en"])
+        text = lang_texts.get(interest, lang_texts.get("betting", ""))
+        if not text:
+            continue
+
+        try:
+            await context.bot.send_chat_action(chat_id=user_id, action="typing")
+            await asyncio.sleep(1.5)
+            await context.bot.send_message(
+                chat_id=user_id, text=text, parse_mode=ParseMode.MARKDOWN)
+            update_user_no_active(user_id, subscribed_reengage_sent=True)
+            logger.info(f"Subscribed silent reengage → {user_id} [{lang}/{interest}]")
+        except TelegramError as e:
+            logger.warning(f"Subscribed reengage [{user_id}]: {e}")
 
 
 async def subscribed_push_job(context: ContextTypes.DEFAULT_TYPE):
@@ -1118,13 +1311,14 @@ def main():
 
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    app.job_queue.run_repeating(reengage_job,         interval=30*60, first=60)
-    app.job_queue.run_repeating(subscribed_push_job,  interval=60*60, first=120)
-    app.job_queue.run_repeating(daily_signal_job,     interval=60*60, first=300)
-    app.job_queue.run_repeating(adrenaline_check_job, interval=15*60, first=180)
+    app.job_queue.run_repeating(reengage_job,                  interval=30*60, first=60)
+    app.job_queue.run_repeating(subscribed_push_job,           interval=60*60, first=120)
+    app.job_queue.run_repeating(subscribed_silent_reengage_job,interval=60*60, first=180)
+    app.job_queue.run_repeating(daily_signal_job,              interval=60*60, first=300)
+    app.job_queue.run_repeating(adrenaline_check_job,          interval=15*60, first=360)
 
-    logger.info("OddsVault Bot v14 🚀  Valeria is online.")
-    logger.info("Jobs: reengage(30m) / silence_push(1h) / daily_signal(1h) / adrenaline(15m)")
+    logger.info("OddsVault Bot v14.1 🚀  Valeria is online.")
+    logger.info("Jobs: reengage(30m) / silence_push(1h) / subscribed_reengage(1h) / daily_signal(1h) / adrenaline(15m)")
     logger.info("Scenarios: S1-S21 | Modules: conversation + ftd_onboarding + scenarios + daily_signal + adrenaline")
     app.run_polling(drop_pending_updates=True)
 
