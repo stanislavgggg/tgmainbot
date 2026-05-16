@@ -1,8 +1,113 @@
 {
   "_comment": "Продукты по каналам. Обновляй вручную когда меняются офферы на канале.",
-  "_last_updated": "2026-05-16",
+  "_last_updated": "2026-05-16 (added SuerteGuru casino ES)",
 
   "channels": {
+
+    "SuerteGuru": {
+      "telegram": "@suerteguru",
+      "geo": ["ES"],
+      "interest": "casino",
+      "language": "es",
+      "description": "Bonos de casino, análisis de slots, mejores ofertas — para jugadores españoles",
+      "channel_value_prop": "¡Descubre las últimas ofertas y recompensas en un solo lugar! Testamos bonos antes de recomendarlos.",
+      "products": [
+        {
+          "id": "rolletto_es",
+          "name": "Rolletto",
+          "type": "casino",
+          "status": "active",
+          "pinned": true,
+          "welcome_offer": "150% hasta 500€ + 200 giros gratis",
+          "bonus_amount": 500,
+          "bonus_amount_pct": 150,
+          "bonus_type": "welcome_deposit",
+          "free_spins": 200,
+          "key_features": [
+            "150% de bono hasta 500€",
+            "200 giros gratis al depositar",
+            "Oferta principal del canal — pinned",
+            "Activación rápida por link del canal"
+          ],
+          "url": "https://mejorescasinos.guru/rolletto",
+          "sell_angle": "150% significa que €100 se convierten en €250 para jugar. Los 200 giros encima — margen real para empezar sin apuro.",
+          "urgency": "Actívalo antes de que lo bajen"
+        },
+        {
+          "id": "ybets_es",
+          "name": "Ybets",
+          "type": "casino",
+          "status": "active",
+          "pinned": false,
+          "welcome_offer": "500% + 400 giros gratis",
+          "bonus_amount_pct": 500,
+          "free_spins": 400,
+          "key_features": [
+            "500% welcome — uno de los más altos del mercado",
+            "400 giros gratis",
+            "7 Days of Luck: bonus semanal para nuevos jugadores",
+            "Mecánica diaria: tareas → llaves → cofres con premios",
+            "Se activa al registrarse, dura 7 días"
+          ],
+          "url": "https://mejorescasinos.guru/ybets",
+          "sell_angle": "500% es el multiplicador más alto que verás — €100 se convierten en €600 para jugar. El sistema de 7 Days of Luck da valor extra cada día de la primera semana.",
+          "urgency": null
+        },
+        {
+          "id": "winrolla_es",
+          "name": "Winrolla",
+          "type": "casino",
+          "status": "active",
+          "pinned": false,
+          "welcome_offer": "Bono de bienvenida + slots en tendencia",
+          "key_features": [
+            "Slots más jugados ahora mismo en España",
+            "Cash Egypt — Hold & Win funcionando muy fuerte",
+            "Wild Cash Bonanza — multiplicadores agresivos, sensación de 'una ronda más'",
+            "Actualizaciones frecuentes de qué slots están calientes"
+          ],
+          "url": "https://winrolla.com",
+          "sell_angle": "El canal trackea en tiempo real qué slots están pagando más en Winrolla — Cash Egypt y Wild Cash Bonanza son los hot ahora mismo. Sabes dónde entrar antes que los demás.",
+          "urgency": null
+        },
+        {
+          "id": "spinplatinum_es",
+          "name": "Spinplatinum",
+          "type": "casino",
+          "status": "active",
+          "pinned": false,
+          "welcome_offer": "Bono de registro",
+          "key_features": [
+            "Muy jugado en España ahora mismo",
+            "Bigger Bass Splash, Wild Hot 40, Bangkok Hilton — slots en tendencia",
+            "Bonus rounds cayendo rápido por las noches"
+          ],
+          "url": "https://spinplatinum.com",
+          "sell_angle": "Por las noches los bonus rounds están cayendo mucho más rápido en Spinplatinum — el canal avisa cuando hay una racha activa.",
+          "urgency": null
+        },
+        {
+          "id": "kingmaker_es",
+          "name": "Kingmaker",
+          "type": "casino",
+          "status": "active",
+          "pinned": false,
+          "welcome_offer": "Bono de bienvenida €500 + 50 oportunidades de ganar €1,000,000",
+          "bonus_amount": 500,
+          "bonus_type": "welcome_deposit",
+          "key_features": [
+            "Bono bienvenida hasta €500",
+            "50 oportunidades de ganar €1,000,000",
+            "Gates of Olympus Roulette — ruleta en vivo con multiplicadores aleatorios",
+            "Más acción que la ruleta estándar — cada giro puede pagar más de lo normal",
+            "Bonos nuevos frecuentes, el canal avisa antes que nadie"
+          ],
+          "url": "https://mejorescasinos.guru/kingmaker",
+          "sell_angle": "€500 de bono + 50 opciones de ganar €1M — es uno de los welcome más redondos ahora mismo. Y tienen Gates of Olympus Roulette: ruleta en vivo con multiplicadores del slot, más voltaje que la ruleta clásica.",
+          "urgency": null
+        }
+      ]
+    },
 
     "ApuestasGuruES": {
       "telegram": "@ApuestasGuruES",
@@ -358,8 +463,8 @@
   "geo_routing": {
     "ES": {
       "betting":   "ApuestasGuruES",
-      "casino":    "ApuestasGuruES",
-      "nodeposit": "ApuestasGuruES",
+      "casino":    "SuerteGuru",
+      "nodeposit": "SuerteGuru",
       "exclusive": "ApuestasGuruES"
     },
     "HR": {
