@@ -279,6 +279,8 @@ async def onboarding_step1_job(context):
     d=context.job.data; user_id,chat_id=d["user_id"],d["chat_id"]
     lang,interest=d["lang"],d["interest"]
     if _user_ftd_done(user_id): return
+    # Если пользователь уже написал сам — _handle_ai_chat ведёт диалог, job не нужен
+    if get_user(user_id).get("ai_msg_count", 0) > 0: return
     profile,history,psychotype,objections=await _get_ctx(user_id)
     text=await generate_step1(lang,interest,psychotype,profile,history,objections)
     await _send(context,user_id,chat_id,text); logger.info(f"ob1 → {user_id}")
@@ -295,6 +297,8 @@ async def onboarding_step2_job(context):
     lang,interest,start_ts=d["lang"],d["interest"],d["start_ts"]
     if _user_ftd_done(user_id): return
     if _user_active_since(user_id,start_ts+20*60): logger.info(f"ob2 skip active {user_id}"); return
+    # Если через диалог уже идёт онбординг (3+ сообщений) — job не нужен
+    if get_user(user_id).get("ai_msg_count", 0) >= 3: return
     profile,history,psychotype,objections=await _get_ctx(user_id)
     barrier=get_user(user_id).get("onboarding_barrier","unknown")
     text=await generate_step2(lang,interest,psychotype,profile,history,objections,barrier)
