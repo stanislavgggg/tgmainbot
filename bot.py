@@ -616,8 +616,16 @@ async def _handle_ai_chat(update, context, user_id, lang, interest, geo, user_te
     if not ftd_done:
         barrier = user.get("onboarding_barrier", "unknown")
 
-        # Если barrier ещё не классифицирован и есть достаточно истории — классифицируем
-        if barrier == "unknown" and len(history) >= 2:
+        # Быстрая классификация barrier из текущего сообщения через keyword-матчинг
+        # (синхронно, без AI — мгновенно)
+        obj_from_text = classify_objection(user_text)
+        if obj_from_text in ("no_money", "no_trust", "dont_understand",
+                             "not_urgent", "already_elsewhere"):
+            barrier = obj_from_text
+            update_user(user_id, onboarding_barrier=barrier)
+
+        # Если barrier ещё не классифицирован и есть достаточно истории — AI classify
+        elif barrier == "unknown" and len(history) >= 2:
             try:
                 barrier = await classify_barrier(history, lang, interest, psychotype)
                 update_user(user_id, onboarding_barrier=barrier)
@@ -625,24 +633,27 @@ async def _handle_ai_chat(update, context, user_id, lang, interest, geo, user_te
             except Exception as e:
                 logger.debug(f"classify_barrier inline: {e}")
 
-        # Обновляем barrier если пришло новое возражение
-        if obj_type and obj_type in (
-            "no_money","no_trust","dont_understand","not_urgent","already_elsewhere"
-        ):
-            barrier = obj_type
-            update_user(user_id, onboarding_barrier=barrier)
-
         response = None
 
         if new_msg_count <= 2:
             # Шаг 1: объясняем как канал работает, задаём личный вопрос
-            try:
-                response = await generate_step1(
-                    lang, interest, psychotype, profile, history, objections)
-            except Exception as e:
-                logger.error(f"generate_step1: {e}")
-            if not response:
-                response = _fb("step1", lang, interest)
+            # Но если barrier уже известен — сразу к step2
+            if barrier != "unknown" and obj_from_text:
+                try:
+                    response = await generate_step2(
+                        lang, interest, psychotype, profile, history, objections, barrier)
+                except Exception as e:
+                    logger.error(f"generate_step2 early: {e}")
+                if not response:
+                    response = _fb("barrier", lang, interest, barrier)
+            else:
+                try:
+                    response = await generate_step1(
+                        lang, interest, psychotype, profile, history, objections)
+                except Exception as e:
+                    logger.error(f"generate_step1: {e}")
+                if not response:
+                    response = _fb("step1", lang, interest)
 
         elif new_msg_count <= 5:
             # Шаг 2: адресуем конкретный barrier
@@ -664,8 +675,8 @@ async def _handle_ai_chat(update, context, user_id, lang, interest, geo, user_te
             if not response:
                 response = _fb("step3", lang)
 
-        else:
-            # Шаг 4: финальный push с urgency, потом замолкаем
+        elif new_msg_count <= 12:
+            # Шаг 4: финальный push с urgency
             try:
                 response = await generate_step4(
                     lang, interest, psychotype, profile, history, objections, barrier)
@@ -673,6 +684,24 @@ async def _handle_ai_chat(update, context, user_id, lang, interest, geo, user_te
                 logger.error(f"generate_step4: {e}")
             if not response:
                 response = _fb("step4", lang)
+
+        else:
+            # Maintenance mode: 12+ сообщений без FTD — не давим, даём ценность
+            # Обычный диалог с мягким напоминанием о канале
+            result = await ask_valeria_conversational(
+                user_message=user_text,
+                history=history,
+                lang=lang,
+                interest=interest,
+                geo=geo,
+                funnel_stage="subscribed",
+                psychotype=psychotype,
+                user_profile=profile,
+                objections=objections,
+                ftd_done=False,
+                current_angle=5,  # финальный угол — без агрессии
+            )
+            response = result["text"]
 
         add_ai_message(user_id, "assistant", response)
         add_tone(user_id, detect_tone(user_text, history))
