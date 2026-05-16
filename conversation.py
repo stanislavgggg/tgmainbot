@@ -214,6 +214,7 @@ async def ask_valeria_conversational(
         "neutral": "NEUTRAL: Hook → gap → next step.",
     }.get(psychotype, "NEUTRAL: Hook → gap → next step.")
 
+    # ── Фикс 2: жёсткий запрет на выдуманные данные с примерами ─────────────
     search_section = ""
     if search_context:
         search_section = (
@@ -221,14 +222,18 @@ async def ask_valeria_conversational(
         )
     else:
         search_section = (
-            f"\nNo real-time data available. Use general patterns about {interest_ctx} "
-            "WITHOUT inventing specific team names, odds, or bonus amounts."
+            f"\nNo real-time data available."
+            f"\nSTRICTLY FORBIDDEN: inventing specific team names, scores, odds, or bonus codes."
+            f"\nBAD example: 'Bayern opened -1.5 (-110), sharp money moved it to -2.5, three books still showing -1.5 for 15 minutes.'"
+            f"\nBAD example: 'Liverpool -1.5 moved from +105 to -115 across 6 books, Bet365 still showing +102.'"
+            f"\nGOOD example: 'Sharp money hit a line this week — 15-min window before the books caught up.'"
+            f"\nGOOD example: 'Seen it happen with major league matches — public side inflated, sharp side quietly moving the number.'"
+            f"\nGeneral patterns and mechanisms only. Zero invented specifics."
         )
 
     # ── Stage instructions ────────────────────────────────────────────────────
 
     if funnel_stage == "discovery":
-        # Углы атаки по порядку — соответствуют _REENGAGE_ANGLES в bot.py
         angle_hints = [
             "Ask how they found this (curiosity hook)",
             "Drop a specific number — 'Sharp money moved €2.3M before the line shifted. 15-minute window.'",
@@ -294,16 +299,23 @@ They ask HOW → give 20% of the answer → "the full picture is in the channel"
 • Any short answer — they're done talking, move them"""
 
     else:  # subscribed
+        # ── Фикс 3: короткий промпт для subscribed без FTD ───────────────────
         if ftd_done:
             stage_instr = f"""SUBSCRIBED — {ftd_count} deposit(s) done.
 Goals: keep active, optimize strategy, push toward repeat deposit.
-Give real practical advice. Ask about actual results. Make next action obvious."""
+Give real practical advice. Ask about actual results. Make next action obvious.
+MAX 3 sentences."""
         else:
-            stage_instr = f"""SUBSCRIBED — no deposit yet.
-Goal: FIRST DEPOSIT. Every single reply moves toward this.
-Be specific about what they're missing right now.
-Make inaction feel expensive. Action feel obvious.
-Address their exact words. Never repeat yourself."""
+            stage_instr = f"""SUBSCRIBED — no deposit yet. Goal: FIRST DEPOSIT.
+
+Every reply moves toward this. One step at a time.
+
+━━━ RULES ━━━
+• MAX 2 sentences. Hard limit. Never exceed.
+• They ask HOW → answer 30% → "the signals cover the rest, check the channel."
+• Never explain the full strategy — leave something for the channel.
+• Make inaction feel expensive in one concrete sentence.
+• Make the next action (check the channel, place first bet) feel obvious and small."""
 
     system = f"""You are Valeria — private insider for betting signals and bonus math.
 You're texting someone 1-on-1 on Telegram. Real conversation. Not a bot script.
@@ -331,7 +343,7 @@ PSYCHOTYPE: {psychotype_instr}
 • Never: "Great!", "Awesome!", "Interesting!", "Of course!", "Sure!"
 • Never: reference being AI, a bot, or following a script.
 • Never: promise profits, guaranteed results, or specific ROI.
-• Never: invent team names, exact odds, or real bonus codes without data.
+• NEVER invent specific team names, exact odds, scores, or bonus codes — no real-time data available.
 
 ━━━ HIDDEN TAGS ━━━
 Place on their own line at the very END of your message. Never mid-text.
