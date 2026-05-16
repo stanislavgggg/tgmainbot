@@ -189,6 +189,37 @@ def analyze_conversation(history: list) -> dict:
             if len(bot_reply) < 40:
                 unanswered.append(msg[:100])
 
+    # ── 7b. Bot questions already asked (anti-repeat tracker) ────────────
+    # Извлекаем вопросы которые бот уже задавал — чтобы не повторять
+
+    _KEY_QUESTIONS = [
+        # betting/casino split
+        ("sport_or_casino",   ["sports person or casino", "betting side or casino", "betting or bonus",
+                                "sports or casino", "sports person or bonus", "deporte o casino",
+                                "sport ili casino", "sportas ar kazino", "sports vai kazino"]),
+        # experience
+        ("experience_level",  ["placed bets before", "bet before", "starting fresh", "zero experience",
+                                "apostado antes", "kladio prije", "statei anksčiau", "lici likmes"]),
+        # tipster history
+        ("tipster_before",    ["tipster signals before", "followed any tipster", "tipster before",
+                                "señales de tipster", "tipster signale", "tipster signalus"]),
+        # usual site / platform
+        ("platform_used",     ["usual site", "what platform", "qué plataforma", "koju platformu",
+                                "kokią platformą", "kuru platformu"]),
+        # multiple books
+        ("multiple_books",    ["multiple books", "tracking multiple", "múltiples casas",
+                                "više kladionica", "kelis bukmeikerius"]),
+        # budget / stake
+        ("stake_size",        ["stake size", "usual stake", "apuesta habitual", "tipičan ulog",
+                                "įprastas statymas"]),
+    ]
+
+    bot_full_text = " ".join(bot_msgs).lower()
+    already_asked_topics = []
+    for topic_name, patterns in _KEY_QUESTIONS:
+        if any(p.lower() in bot_full_text for p in patterns):
+            already_asked_topics.append(topic_name)
+
     # ── 8. Engagement score (0–10) ────────────────────────────────────────
 
     score = 0
@@ -232,6 +263,7 @@ def analyze_conversation(history: list) -> dict:
         "key_statements":        key_statements,
         "micro_commitments":     micro_commitments,
         "unanswered_questions":  unanswered[:3],
+        "already_asked_topics":  already_asked_topics,
         "engagement_score":      engagement_score,
         "rapport_level":         rapport,
         "recommended_technique": technique,
@@ -358,6 +390,7 @@ def _empty_analysis() -> dict:
         "key_statements":        [],
         "micro_commitments":     [],
         "unanswered_questions":  [],
+        "already_asked_topics":  [],
         "engagement_score":      0,
         "rapport_level":         "cold",
         "recommended_technique": {
@@ -410,6 +443,19 @@ def format_analysis_for_prompt(analysis: dict) -> str:
         failed = " | ".join(a["failed_angles"][:3])
         lines.append(f"• Already tried, didn't land: {failed}")
         lines.append("  → DO NOT repeat these. Completely different angle.")
+
+    if a.get("already_asked_topics"):
+        topic_labels = {
+            "sport_or_casino":  "sports or casino split",
+            "experience_level": "whether they bet before",
+            "tipster_before":   "tipster experience",
+            "platform_used":    "what platform/site they use",
+            "multiple_books":   "whether they use multiple books",
+            "stake_size":       "their usual stake size",
+        }
+        asked = [topic_labels.get(t, t) for t in a["already_asked_topics"]]
+        lines.append(f"• Questions ALREADY ASKED — NEVER ask again: {', '.join(asked)}")
+        lines.append("  → FORBIDDEN to repeat these. Move to action or a completely different topic.")
 
     if a["micro_commitments"]:
         commits = " | ".join(a["micro_commitments"][-2:])
