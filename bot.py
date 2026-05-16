@@ -41,6 +41,7 @@ from referral import (should_offer_referral, get_referral_offer_text,
                        get_referrer_from_start, is_positive_message)
 from adrenaline import adrenaline_check_job
 import messages as M
+
 logging.basicConfig(format="%(asctime)s [%(levelname)s] %(name)s: %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -55,6 +56,45 @@ def _check_lock():
     with open(LOCK_FILE,"w") as f: f.write(str(os.getpid()))
     atexit.register(lambda: os.path.exists(LOCK_FILE) and os.remove(LOCK_FILE))
 _check_lock()
+
+# ── Reengage angles — 5 углов атаки по очереди ───────────────────────────────
+_REENGAGE_ANGLES: dict[str, list[str]] = {
+    "en": [
+        "Still around? How did you end up finding this in the first place?",
+        "*Sharp money moved before the line shifted* — 15-minute window most people miss. Still relevant to you?",
+        "Quick one — you more of a sports person or casino?",
+        "Most people who find this got burned going it alone first. That the case for you?",
+        "Last one from me — what's the one thing that would actually make this worth looking at?",
+    ],
+    "es": [
+        "¿Sigues por aquí? ¿Cómo terminaste encontrando esto?",
+        "*El dinero sharp se movió antes de que la cuota cambiara* — ventana de 15 minutos que la mayoría pierde. ¿Sigue siendo relevante para ti?",
+        "Rápido — ¿eres más de deportes o casino?",
+        "La mayoría que llega aquí se quemó yendo solo primero. ¿Ese es tu caso?",
+        "La última de mi parte — ¿qué haría que realmente valiera la pena echar un vistazo?",
+    ],
+    "hr": [
+        "Jesi li još tu? Kako si uopće završio pronalazeći ovo?",
+        "*Novac se pomaknuo prije nego što se kvota promijenila* — 15-minutni prozor koji većina propušta. Je li još relevantno za tebe?",
+        "Kratko — jesi više sports tip ili casino?",
+        "Većina koji nađu ovo prvo su se opekli idući sami. Je li to tvoj slučaj?",
+        "Zadnje od mene — što bi zapravo učinilo da vrijedi pogledati?",
+    ],
+    "lt": [
+        "Vis dar čia? Kaip apskritai radai šitą?",
+        "*Pinigai pajudėjo prieš koeficientui pasikeičiant* — 15 minučių langas kurį dauguma praleidžia. Vis dar aktualu?",
+        "Greitai — esi labiau sporto ar kazino žmogus?",
+        "Dauguma kurie randa šitą pirmiausia nudegė eidami vieni. Ar tavo atvejis?",
+        "Paskutinis iš manęs — kas tikrai privertų tai verta pažiūrėti?",
+    ],
+    "lv": [
+        "Vēl esi šeit? Kā tu vispār atradi šito?",
+        "*Nauda pakustējās pirms koeficients mainījās* — 15 minūšu logs ko vairākums palaiž garām. Vēl aktuāli?",
+        "Ātri — tu esi vairāk sporta vai kazino cilvēks?",
+        "Vairākums kas atrod šito vispirms apdedzinājās ejot vieni. Vai tā ir tava situācija?",
+        "Pēdējais no manis — kas tiešām liktu to vērts apskatīt?",
+    ],
+}
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 def _typing_delay(text): return round(1.2 + min(len(text)/140, 2.0), 1)
@@ -108,9 +148,6 @@ async def _delayed_cta_job(context: ContextTypes.DEFAULT_TYPE):
     user_id, chat_id = d["user_id"], d["chat_id"]
     lang, interest, geo = d["lang"], d["interest"], d["geo"]
     user = get_user(user_id)
-    # Не шлём CTA если:
-    # - пользователь уже ответил (stage_replies > 0)
-    # - состояние уже не TEASE (user_joined нажали)
     if user.get("stage_replies", 0) > 0:
         return
     if user.get("state") != State.TEASE:
@@ -125,19 +162,9 @@ async def _send_cta(bot, user_id, chat_id, lang, interest, geo):
 
 
 # ════════════════════════════════════════════════════════════════════════════
-#  /start — HOOK с картинкой + кнопки языков → QUIZ (интерес)
-#
-#  Картинка: файл 1name.png лежит в корне репо рядом с bot.py
-#  Или используй HOOK_IMAGE_URL (прямая ссылка на картинку).
-#
-#  Поток: send_photo(caption=HOOK, кнопки языков) → пользователь выбирает
-#  язык → lang_chosen → QUIZ → interest_chosen → GEO-квиз → geo_chosen → AI
+#  /start
 # ════════════════════════════════════════════════════════════════════════════
-
-# Путь к картинке (лежит рядом с bot.py в репо)
 HOOK_IMAGE_PATH = os.path.join(os.path.dirname(__file__), "1name.png")
-
-# Fallback: прямой URL если файл не найден (замени на свой хостинг)
 HOOK_IMAGE_URL  = "https://raw.githubusercontent.com/stanislavgggg/tgmainbot/4891019e49ee730aad0db5bcd065708a1b44c471/1name.png"
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -146,7 +173,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     tg_lang    = update.effective_user.language_code
     chat_id    = update.effective_chat.id
 
-    # Реферальный параметр
     start_param = context.args[0] if context.args else ""
     if start_param:
         referrer_id = get_referrer_from_start(start_param)
@@ -159,7 +185,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang      = existing.get("lang") or resolve_lang(geo_hint, tg_lang)
 
     # ── S7: Возвращающийся пользователь ──────────────────────────────────────
-    # Если пользователь уже был в диалоге — не начинаем заново
     prev_stage = existing.get("funnel_stage", "new")
     if prev_stage not in ("new", "") and existing.get("stage_replies", 0) > 0:
         interest = existing.get("interest", "betting")
@@ -170,12 +195,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await asyncio.sleep(1.2)
         await context.bot.send_message(
             chat_id=chat_id, text=opener, parse_mode=ParseMode.MARKDOWN)
-        # Восстанавливаем нужное состояние
         if prev_stage == "subscribed":
             update_user(user_id, state=State.AI_CHAT)
         else:
             update_user(user_id, state=State.WARM1, stage_replies=0,
-                        reengage_1_sent=False, reengage_2_sent=False)
+                        reengage_1_sent=False, reengage_2_sent=False,
+                        current_angle=0)
         return
 
     # ── Новый пользователь ────────────────────────────────────────────────────
@@ -190,13 +215,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         commitment_sent=False, cta_replies=0,
         fallback_count=0, ab_variant=variant,
         positive_msg_count=0,
+        current_angle=0,
     )
     logger.info(f"START new user={user_id} lang={lang} geo={geo_hint} variant={variant}")
 
     hook_text = get_hook_text(variant, lang)
     await asyncio.sleep(0.8)
 
-    # Отправляем фото + HOOK текст
     sent = False
     if os.path.exists(HOOK_IMAGE_PATH):
         try:
@@ -220,10 +245,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             chat_id=chat_id, text=hook_text, parse_mode=ParseMode.MARKDOWN)
 
     track_event(user_id, "hook_shown")
-    # OPENING_QUESTION встроен в HOOK текст — отдельно не отправляем
     update_user(user_id, state=State.WARM1, funnel_stage="discovery")
-
-
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -293,8 +315,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     interest = user.get("interest", "betting")
     geo      = user.get("geo", "OTHER")
 
-    # ── Детектор ГЕО из текста (если пользователь написал страну) ────────────
-    # Детектор GEO из текста — обновляем если ещё не определили
+    # Детектор GEO из текста
     if geo in ("OTHER", ""):
         detected_geo = detect_geo_from_text(user_text)
         if detected_geo and detected_geo != geo:
@@ -332,7 +353,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                               update.effective_chat.id, lang, interest)
         await _handle_ai_chat(update, context, user_id, lang, interest, geo, user_text, user)
     else:
-        # Любое неизвестное состояние → warming
         logger.warning(f"Unknown state={state} for {user_id} → WARM1")
         update_user(user_id, state=State.WARM1, funnel_stage="discovery")
         await _handle_warming(update, context, user_id, lang, interest, geo, user_text, user)
@@ -349,34 +369,25 @@ async def _update_profile_silent(user_id, text, lang):
 
 
 def _detect_lang_switch(text: str):
-    """
-    Детектирует когда пользователь просит переключить язык.
-    Возвращает код языка или None.
-    """
     t = text.lower().strip()
-    # English triggers
     if any(t == p or t.startswith(p) for p in [
         "switch to english", "english please", "speak english",
         "in english", "change to english", "английский", "по-английски",
     ]):
         return "en"
-    # Spanish triggers
     if any(t == p or t.startswith(p) for p in [
         "switch to spanish", "en español", "español", "habla español",
         "cambiar a español", "speak spanish",
     ]):
         return "es"
-    # Croatian triggers
     if any(t == p or t.startswith(p) for p in [
         "switch to croatian", "hrvatski", "na hrvatskom", "speak croatian",
     ]):
         return "hr"
-    # Lithuanian triggers
     if any(t == p or t.startswith(p) for p in [
         "switch to lithuanian", "lietuviškai", "lietuvių", "speak lithuanian",
     ]):
         return "lt"
-    # Latvian triggers
     if any(t == p or t.startswith(p) for p in [
         "switch to latvian", "latviešu", "latviski", "speak latvian",
     ]):
@@ -384,16 +395,10 @@ def _detect_lang_switch(text: str):
     return None
 
 
-
 # ════════════════════════════════════════════════════════════════════════════
 #  WARMING handler
 # ════════════════════════════════════════════════════════════════════════════
 async def _handle_warming(update, context, user_id, lang, interest, geo, user_text, user):
-    """
-    Диалоговый warming. Использует ask_valeria_conversational.
-    AI сам определяет interest и GEO из ответов пользователя.
-    Переходит к tease когда накоплено достаточно контекста (обычно 2-3 обмена).
-    """
     chat_id    = update.effective_chat.id
     history    = get_ai_history(user_id)
     replies    = user.get("stage_replies", 0) + 1
@@ -407,7 +412,9 @@ async def _handle_warming(update, context, user_id, lang, interest, geo, user_te
     if obj_type:
         log_objection(user_id, obj_type)
 
-    update_user(user_id, stage_replies=replies)
+    # Инкрементируем угол атаки — AI знает на каком шаге разговор
+    current_angle = user.get("current_angle", 0)
+    update_user(user_id, stage_replies=replies, current_angle=current_angle + 1)
 
     await context.bot.send_chat_action(chat_id, "typing")
 
@@ -422,6 +429,7 @@ async def _handle_warming(update, context, user_id, lang, interest, geo, user_te
         user_profile=profile,
         objections=objections,
         ftd_done=ftd_done,
+        current_angle=current_angle,
     )
 
     response = result["text"]
@@ -432,36 +440,41 @@ async def _handle_warming(update, context, user_id, lang, interest, geo, user_te
     # Обновляем interest и GEO если AI их определил
     updates = {}
     if result["detected_interest"] and not user.get("interest_confirmed"):
-        updates["interest"]          = result["detected_interest"]
+        updates["interest"]           = result["detected_interest"]
         updates["interest_confirmed"] = True
-        interest                     = result["detected_interest"]
-        logger.info(f"Interest detected from text: {interest} for {user_id}")
+        interest                      = result["detected_interest"]
+        logger.info(f"Interest detected: {interest} for {user_id}")
     if result["detected_geo"] and (not geo or geo == "OTHER"):
         from membership import resolve_lang as _resolve_lang
         new_geo  = result["detected_geo"]
         new_lang = _resolve_lang(new_geo)
         updates["geo"]  = new_geo
         updates["lang"] = new_lang
-        lang            = new_lang
-        geo             = new_geo
-        logger.info(f"GEO detected from text: {new_geo} → lang={new_lang} for {user_id}")
+        lang = new_lang
+        geo  = new_geo
+        logger.info(f"GEO detected: {new_geo} → lang={new_lang} for {user_id}")
     if updates:
         update_user(user_id, **updates)
 
     await asyncio.sleep(_typing_delay(response) * 0.5)
     await update.message.reply_text(response, parse_mode=ParseMode.MARKDOWN)
 
-    # Tease trigger — AI решает когда момент настал.
-    # Минимум 1 реплика. Intent детектируется AI — работает на любом языке.
+    # Tease trigger
     interest_known = bool(
         result["detected_interest"] or
         user.get("interest_confirmed") or
         interest not in (None, "betting")
     )
 
-    should_tease = result["move_to_tease"] and interest_known and replies >= 1
+    # Если AI решил tease — пушим
+    # Если угол >= 4 (5-я реплика) — пушим принудительно независимо от интереса
+    force_tease = (current_angle >= 4)
+    should_tease = (result["move_to_tease"] and interest_known and replies >= 1) or force_tease
 
     if should_tease:
+        # При force_tease используем дефолтный interest если не определили
+        if force_tease and not interest_known:
+            interest = interest or "betting"
         await asyncio.sleep(3.0)
         fresh = get_user(user_id)
         if fresh.get("stage_replies", 0) == replies:
@@ -473,7 +486,6 @@ async def _handle_warming(update, context, user_id, lang, interest, geo, user_te
 #  TEASE handler
 # ════════════════════════════════════════════════════════════════════════════
 async def _handle_tease(update, context, user_id, lang, interest, geo, user_text):
-    """Пользователь ответил на TEASE — обрабатываем возражение → CTA."""
     chat_id    = update.effective_chat.id
     history    = get_ai_history(user_id)
     psychotype = get_psychotype(user_id)
@@ -500,7 +512,6 @@ async def _handle_tease(update, context, user_id, lang, interest, geo, user_text
 
 
 async def _handle_cta(update, context, user_id, lang, interest, geo, user_text):
-    """Пользователь написал на CTA — обрабатываем. Кнопку повторяем раз в 3 сообщения."""
     chat_id    = update.effective_chat.id
     history    = get_ai_history(user_id)
     user       = get_user(user_id)
@@ -530,7 +541,7 @@ async def _handle_cta(update, context, user_id, lang, interest, geo, user_text):
 
 
 # ════════════════════════════════════════════════════════════════════════════
-#  AI Chat (subscribed) — полная обработка всех post-sub сценариев
+#  AI Chat (subscribed)
 # ════════════════════════════════════════════════════════════════════════════
 async def _handle_ai_chat(update, context, user_id, lang, interest, geo, user_text, user):
     chat_id    = update.effective_chat.id
@@ -551,10 +562,9 @@ async def _handle_ai_chat(update, context, user_id, lang, interest, geo, user_te
                 last_user_message_at=datetime.now(timezone.utc).isoformat())
     await context.bot.send_chat_action(chat_id, "typing")
 
-    # ── S16/S17: Win/Loss сценарии — быстрый специфичный ответ ──────────────
+    # ── S16/S17: Win/Loss ────────────────────────────────────────────────────
     if ftd_done:
         msg_type = classify_post_ftd_message(user_text)
-
         if msg_type == "won":
             text = get_win_response(lang, interest)
             if text:
@@ -562,7 +572,6 @@ async def _handle_ai_chat(update, context, user_id, lang, interest, geo, user_te
                 await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
                 add_ai_message(user_id, "assistant", text)
                 return
-
         elif msg_type == "lost":
             text = get_loss_response(lang, interest)
             if text:
@@ -571,10 +580,9 @@ async def _handle_ai_chat(update, context, user_id, lang, interest, geo, user_te
                 add_ai_message(user_id, "assistant", text)
                 return
 
-    # ── S19: VIP тон для 2+ депозитов ────────────────────────────────────────
+    # ── S19: VIP ─────────────────────────────────────────────────────────────
     is_vip = ftd_count >= VIP_FTD_THRESHOLD
     if is_vip and msg_count == 0:
-        # Первое сообщение после достижения VIP — сменить тон
         vip_msg = get_vip_message(lang, ftd_count)
         if vip_msg:
             await asyncio.sleep(1.0)
@@ -582,7 +590,7 @@ async def _handle_ai_chat(update, context, user_id, lang, interest, geo, user_te
             add_ai_message(user_id, "assistant", vip_msg)
             return
 
-    # ── Основной диалог через ask_valeria_conversational ─────────────────────
+    # ── Основной диалог ───────────────────────────────────────────────────────
     result = await ask_valeria_conversational(
         user_message=user_text,
         history=history,
@@ -601,12 +609,11 @@ async def _handle_ai_chat(update, context, user_id, lang, interest, geo, user_te
     add_ai_message(user_id, "assistant", response)
     add_tone(user_id, detect_tone(user_text, history))
 
-    # Обновляем interest если AI переключил
     if result["detected_interest"] and result["detected_interest"] != interest:
         update_user(user_id, interest=result["detected_interest"])
         interest = result["detected_interest"]
 
-    # ── S20: Реферал после 5 позитивных сообщений ────────────────────────────
+    # ── S20: Реферал ─────────────────────────────────────────────────────────
     if is_positive_message(user_text):
         pos_count = user.get("positive_msg_count", 0) + 1
         update_user(user_id, positive_msg_count=pos_count)
@@ -621,7 +628,7 @@ async def _handle_ai_chat(update, context, user_id, lang, interest, geo, user_te
             track_referral_offer(user_id)
             return
 
-    # ── Калькулятор на 3/8/15 сообщении для casino/nodeposit ─────────────────
+    # ── Калькулятор ───────────────────────────────────────────────────────────
     new_count = msg_count + 1
     if should_show_calculator(interest, "subscribed", new_count):
         await asyncio.sleep(_typing_delay(response) * 0.5)
@@ -642,13 +649,10 @@ async def _handle_ai_chat(update, context, user_id, lang, interest, geo, user_te
     await update.message.reply_text(response, parse_mode=ParseMode.MARKDOWN)
 
 
-
-
 # ════════════════════════════════════════════════════════════════════════════
-#  /stats, /help, /admin_fetch_ids, /debug
+#  Commands
 # ════════════════════════════════════════════════════════════════════════════
 async def calc_deposit_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Пользователь выбрал размер депозита в калькуляторе."""
     query   = update.callback_query; await query.answer()
     user_id = query.from_user.id
     user    = get_user(user_id)
@@ -662,7 +666,6 @@ async def calc_deposit_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE
     try: await query.edit_message_reply_markup(reply_markup=None)
     except Exception: pass
 
-    # Для betting — показываем stake buttons
     if interest == "betting":
         await context.bot.send_chat_action(chat_id, "typing")
         await asyncio.sleep(1.0)
@@ -675,7 +678,6 @@ async def calc_deposit_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE
         update_user(user_id, calc_deposit=deposit)
         return
 
-    # Для casino/nodeposit — сразу результат
     await context.bot.send_chat_action(chat_id, "typing")
     await asyncio.sleep(1.5)
     result_text = format_casino_result(lang, deposit, interest)
@@ -684,7 +686,6 @@ async def calc_deposit_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE
     add_ai_message(user_id, "assistant", result_text)
 
 async def calc_stake_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Пользователь выбрал размер ставки (для betting)."""
     query   = update.callback_query; await query.answer()
     user_id = query.from_user.id
     user    = get_user(user_id)
@@ -704,7 +705,6 @@ async def calc_stake_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
         chat_id=chat_id, text=result_text, parse_mode=ParseMode.MARKDOWN)
     add_ai_message(user_id, "assistant", result_text)
 
-
 async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     users = get_all_users()
     by_state, by_lang, by_geo, subscribed = {}, {}, {}, 0
@@ -720,7 +720,6 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
 
 async def admin_ab_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """A/B тест статистика."""
     stats = get_ab_stats()
     text  = format_ab_stats_message(stats)
     await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
@@ -746,13 +745,9 @@ async def admin_fetch_ids(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode=ParseMode.MARKDOWN)
 
 async def debug_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Диагностика: тестирует реальный вызов Anthropic API."""
     user_id = update.effective_user.id
     user    = get_user(user_id)
-
     key_status = "✅ SET" if ANTHROPIC_KEY else "❌ MISSING"
-
-    # Реальный тест API
     api_test = "🔄 Testing..."
     if ANTHROPIC_KEY:
         try:
@@ -783,6 +778,7 @@ async def debug_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"`geo`: `{user.get('geo','—')}`\n"
         f"`interest`: `{user.get('interest','—')}`\n"
         f"`stage_replies`: `{user.get('stage_replies',0)}`\n"
+        f"`current_angle`: `{user.get('current_angle',0)}`\n"
         f"`fallback_count`: `{user.get('fallback_count',0)}`"
     )
     await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
@@ -795,17 +791,21 @@ async def reengage_job(context: ContextTypes.DEFAULT_TYPE):
     """
     S2: Возврат в разговор если человек замолчал до подписки.
 
-    Принцип: возвращаем в ДИАЛОГ, не пушим рассылку.
-    - 4h молчания → один вопрос продолжающий разговор (без CTA)
-    - 24h молчания → последний шанс (с CTA только если в tease/cta)
-    - Больше не беспокоим
+    Логика углов атаки:
+    - Берём current_angle из storage — знаем где остановились
+    - Шлём следующий угол по очереди из _REENGAGE_ANGLES
+    - Если дошли до последнего угла — добавляем CTA кнопку
+    - После последнего угла больше не беспокоим
     """
     now = datetime.now(timezone.utc).timestamp()
 
     for user in get_all_users():
         user_id = user.get("id")
         if not user_id: continue
-        if user.get("funnel_stage") not in ("warming", "tease", "cta"): continue
+        if user.get("funnel_stage") not in ("discovery", "warming", "tease", "cta"): continue
+
+        # Не трогаем если уже прошли все углы
+        if user.get("reengage_exhausted"): continue
 
         try:
             lt = datetime.fromisoformat(user.get("last_active", ""))
@@ -813,75 +813,59 @@ async def reengage_job(context: ContextTypes.DEFAULT_TYPE):
             silent_hours = (now - lt.timestamp()) / 3600
         except Exception: continue
 
-        lang    = user.get("lang", "en")
-        interest= user.get("interest", "betting")
-        geo     = user.get("geo", "OTHER")
-        funnel  = user.get("funnel_stage", "warming")
-        history = get_ai_history(user_id)
+        # Минимум 4 часа молчания
+        if silent_hours < 4:
+            continue
 
-        # ── Первый возврат: 4-48h молчания — контекстный вопрос ──────────────
-        if not user.get("reengage_1_sent") and 4 <= silent_hours < 48:
-            # Простой вопрос продолжающий разговор — без CTA, без давления
-            _re1 = {
-                "warming": {
-                    "en": "Still around? What was the part you wanted to think over?",
-                    "es": "¿Sigues por aquí? ¿Qué parte querías pensar?",
-                    "hr": "Jesi li još tu? Koji dio si htio razmisliti?",
-                    "lt": "Vis dar čia? Kurią dalį norėjai apgalvoti?",
-                    "lv": "Vēl esi šeit? Kuru daļu gribēji pārdomāt?",
-                },
-                "tease": {
-                    "en": "Something moved in the channel since we talked. Still interested?",
-                    "es": "Algo se movió en el canal desde que hablamos. ¿Sigue interesándote?",
-                    "hr": "Nešto se pokrenulo u kanalu od kad smo pričali. Još te zanima?",
-                    "lt": "Kažkas pajudėjo kanale nuo mūsų pokalbio. Vis dar domina?",
-                    "lv": "Kanālā kaut kas notika kopš runājām. Vēl interesē?",
-                },
-                "cta": {
-                    "en": "The window's still open. What's the real hesitation?",
-                    "es": "La ventana sigue abierta. ¿Cuál es la duda real?",
-                    "hr": "Prozor je još otvoren. Koja je prava oklijevanje?",
-                    "lt": "Langas vis dar atviras. Koks tikrasis svyravimas?",
-                    "lv": "Logs joprojām atvērts. Kāda ir īstā vilcināšanās?",
-                },
-            }
-            text = _re1.get(funnel, _re1["warming"]).get(lang, _re1.get(funnel, _re1["warming"])["en"])
+        lang     = user.get("lang", "en")
+        interest = user.get("interest", "betting")
+        geo      = user.get("geo", "OTHER")
+        funnel   = user.get("funnel_stage", "warming")
+
+        # Текущий угол атаки — с какого места продолжаем
+        current_angle = user.get("current_angle", 0)
+        lang_angles   = _REENGAGE_ANGLES.get(lang, _REENGAGE_ANGLES["en"])
+        idx           = min(current_angle, len(lang_angles) - 1)
+        text          = lang_angles[idx]
+
+        # Последний угол — добавляем CTA кнопку
+        is_last = (idx >= len(lang_angles) - 1)
+        kb = None
+        if is_last:
             try:
-                await context.bot.send_message(
-                    chat_id=user_id, text=text, parse_mode=ParseMode.MARKDOWN)
-                update_user(user_id, reengage_1_sent=True)
-                logger.info(f"Reengage 1 [{funnel}] → {user_id}")
-            except TelegramError as e: logger.warning(f"Reengage 1 [{user_id}]: {e}")
-
-        # ── Второй возврат: 24h+ молчания — последний шанс ───────────────────
-        elif user.get("reengage_1_sent") and not user.get("reengage_2_sent") and silent_hours >= 24:
-            _re2 = {
-                "en": "Last thing from me — what would actually make this worth trying for you?",
-                "es": "Lo último de mi parte — ¿qué haría que realmente valiera la pena intentarlo?",
-                "hr": "Zadnje od mene — što bi zapravo učinilo da vrijedi probati za tebe?",
-                "lt": "Paskutinis dalykas iš manęs — kas tikrai priverstų tai atrodyti verta pabandyti?",
-                "lv": "Pēdējais no manis — kas tev tiešām liktu just ka vērts pamēģināt?",
-            }
-            text = _re2.get(lang, _re2["en"])
-            kb = None
-            if funnel in ("tease", "cta"):
                 channel_url = await get_channel_link(geo, interest) or "https://t.me/ApuestasGuruES"
                 kb = InlineKeyboardMarkup([
                     [InlineKeyboardButton(get_channel_title(geo, interest), url=channel_url)],
-                    [InlineKeyboardButton(M.CTA_BUTTON_JOINED.get(lang, "✅"), callback_data="user_joined")],
+                    [InlineKeyboardButton(
+                        M.CTA_BUTTON_JOINED.get(lang, "✅ Already in"),
+                        callback_data="user_joined")],
                 ])
-            try:
-                await context.bot.send_message(
-                    chat_id=user_id, text=text,
-                    parse_mode=ParseMode.MARKDOWN, reply_markup=kb)
-                update_user(user_id, reengage_2_sent=True)
-                logger.info(f"Reengage 2 [last chance] → {user_id}")
-            except TelegramError as e: logger.warning(f"Reengage 2 [{user_id}]: {e}")
+            except Exception:
+                kb = _cta_keyboard(lang, interest, geo)
+
+        try:
+            await context.bot.send_message(
+                chat_id=user_id, text=text,
+                parse_mode=ParseMode.MARKDOWN, reply_markup=kb)
+
+            # Двигаем угол вперёд
+            next_angle = current_angle + 1
+            if is_last:
+                # Больше не беспокоим
+                update_user(user_id, current_angle=next_angle, reengage_exhausted=True)
+                logger.info(f"Reengage EXHAUSTED angle={idx} → {user_id}")
+            else:
+                update_user(user_id, current_angle=next_angle,
+                            reengage_1_sent=True)
+                logger.info(f"Reengage angle={idx} [{funnel}] → {user_id}")
+
+        except TelegramError as e:
+            logger.warning(f"Reengage [{user_id}]: {e}")
+
 
 async def subscribed_push_job(context: ContextTypes.DEFAULT_TYPE):
     """
     Умный silence push — один точечный вопрос если молчат >4 часов.
-    Не серия. Не монолог. Один вопрос → ждём ответа.
     """
     for user in get_all_users():
         user_id = user.get("id")
@@ -921,7 +905,6 @@ def main():
     if not token:
         logger.error("BOT_TOKEN not set!"); sys.exit(1)
 
-    # Диагностика при старте
     if ANTHROPIC_KEY:
         logger.info(f"✅ ANTHROPIC_KEY is set ({len(ANTHROPIC_KEY)} chars)")
     else:
@@ -936,20 +919,20 @@ def main():
     app.add_handler(CommandHandler("admin_fetch_ids", admin_fetch_ids))
     app.add_handler(CommandHandler("admin_ab",        admin_ab_stats))
 
-    app.add_handler(CallbackQueryHandler(user_joined,       pattern=r"^user_joined$"))
+    app.add_handler(CallbackQueryHandler(user_joined,         pattern=r"^user_joined$"))
     app.add_handler(CallbackQueryHandler(calc_deposit_chosen, pattern=r"^calc_dep_"))
     app.add_handler(CallbackQueryHandler(calc_stake_chosen,   pattern=r"^calc_stake_"))
 
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    app.job_queue.run_repeating(reengage_job,        interval=30*60,  first=60)
-    app.job_queue.run_repeating(subscribed_push_job, interval=60*60,  first=120)
-    app.job_queue.run_repeating(daily_signal_job,    interval=60*60,  first=300)   # каждый час, проверяет таймзону
-    app.job_queue.run_repeating(adrenaline_check_job,interval=15*60,  first=180)   # каждые 15 мин
+    app.job_queue.run_repeating(reengage_job,         interval=30*60, first=60)
+    app.job_queue.run_repeating(subscribed_push_job,  interval=60*60, first=120)
+    app.job_queue.run_repeating(daily_signal_job,     interval=60*60, first=300)
+    app.job_queue.run_repeating(adrenaline_check_job, interval=15*60, first=180)
 
     logger.info("OddsVault Bot v14 🚀  Valeria is online.")
-    logger.info(f"Jobs registered: reengage(30m) / silence_push(1h) / daily_signal(1h) / adrenaline(15m)")
-    logger.info(f"Scenarios active: S1-S21 | Modules: conversation + ftd_onboarding + scenarios + daily_signal + adrenaline")
+    logger.info("Jobs: reengage(30m) / silence_push(1h) / daily_signal(1h) / adrenaline(15m)")
+    logger.info("Scenarios: S1-S21 | Modules: conversation + ftd_onboarding + scenarios + daily_signal + adrenaline")
     app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
