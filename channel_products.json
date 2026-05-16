@@ -70,11 +70,11 @@
             "Bez skrivenih naknada"
           ],
           "url": "https://betrepublic.com",
-          "sell_angle": "Sve pick u kanalu stavljamo na BetRepublic. Registriraj se tamo gdje pratimo — lakše pratiš naše analize i kupleš iste kurierse.",
+          "sell_angle": "Sve pickove u kanalu stavljamo na BetRepublic. Registriraj se tamo gdje pratimo — lakše pratiš naše analize.",
           "urgency": null
         },
         {
-          "id": "immerion_hr",
+          "id": "immerion_hr_betting",
           "name": "Immerion",
           "type": "casino",
           "status": "active",
@@ -84,14 +84,13 @@
           "bonus_type": "welcome_deposit",
           "nodeposit_spins": 20,
           "key_features": [
-            "20 free spins bez uplate",
+            "20 free spina bez uplate",
             "250% bonus do 4000€",
-            "Sigurno i pogodno za igranje",
             "High RTP slotovi: All Lucky Clovers 97%, Wolf Gold 96%"
           ],
           "url": "https://geek.hr/immerion",
-          "sell_angle": "20 free spina bez uplate — nula rizika za početak. Ako ti se svidi, bonus od 250% daje pravi prostor za igru.",
-          "urgency": "Aktiviraj bonus i isprobaj bez rizika"
+          "sell_angle": "20 free spina bez uplate — nula rizika za početak. Ako ti se svidi, bonus od 250% daje pravi prostor.",
+          "urgency": null
         }
       ]
     },
@@ -116,7 +115,7 @@
             "Jak welcome deal s dobrom vrijednošću"
           ],
           "url": "https://geek.hr/slotsvader",
-          "sell_angle": "Ovo je naša trenutna preporuka #1 — pinali smo je jer ima dovoljno vrijednosti za pravi run od početka.",
+          "sell_angle": "Ovo je naša preporuka #1 — pinali smo je jer ima dovoljno vrijednosti za pravi run od početka.",
           "urgency": "Aktiviraj danas"
         },
         {
@@ -132,11 +131,11 @@
           "key_features": [
             "240% match bonus",
             "300 free spinova",
-            "Vrijedi do 18. maja"
+            "Vremenski ograničen ofer"
           ],
           "url": "https://geek.hr/winshark",
-          "sell_angle": "240% znači da €100 postaje €340 za igru. 300 spinova povrh toga — dovoljno da uhvatiš bonus round bez stresa.",
-          "urgency": "Valid until May 18"
+          "sell_angle": "240% znači da €100 postaje €340 za igru. 300 spinova povrh — dovoljno da uhvatiš bonus round bez stresa.",
+          "urgency": "Vremenski ograničen ofer"
         },
         {
           "id": "midarion_balkan",
@@ -149,10 +148,10 @@
             "Lokalna plaćanja rade glatko",
             "Mobilna verzija stvarno čista",
             "Bez dosadnih popupa",
-            "Real win: +123€ od 20€ depozita na Zeus Ze Zekond"
+            "Real win: +123€ od 20€ depozita"
           ],
           "url": "https://geek.hr/midarion",
-          "sell_angle": "Testirali smo nekoliko dana — lokalne uplate rade bez komplikacija, mobilna verzija ne boli nakon 15 minuta igranja.",
+          "sell_angle": "Testirali smo — lokalne uplate bez komplikacija, mobilna ne boli nakon 15 minuta igranja.",
           "urgency": null
         },
         {
@@ -171,7 +170,7 @@
             "250% bonus do 4000€"
           ],
           "url": "https://geek.hr/immerion",
-          "sell_angle": "Ako igraš slotove, RTP je važan. Ovi imaju 96-97% — to je gornja polica. 20 spina bez uplate da provjeriš osjećaj.",
+          "sell_angle": "Ako igraš slotove, RTP je važan. Ovi imaju 96-97% — gornja polica. 20 spina bez uplate da provjeriš osjećaj.",
           "urgency": null
         },
         {
@@ -190,37 +189,212 @@
           "urgency": null
         }
       ]
+    },
+
+    "LuckyLatvia": {
+      "telegram": "@LuckyLatvia",
+      "geo": ["LV"],
+      "interest": "casino",
+      "language": "lv",
+      "description": "Kazino bonusi, slot apskati, RTP padomi — Latviešu spēlētājiem",
+      "channel_value_prop": "Testējam kazino un bonusus pirms jūs ieguldāt. Reāli laimesti, RTP analīze, promo logi.",
+      "products": [
+        {
+          "id": "snatch_lv",
+          "name": "Snatch Casino",
+          "type": "casino",
+          "status": "active",
+          "pinned": true,
+          "welcome_offer": "20 bezmaksas griezieni bez depozīta",
+          "nodeposit_spins": 20,
+          "key_features": [
+            "20 bezmaksas griezieni bez depozīta — nulles risks",
+            "Ātri maksājumi",
+            "Daudz dinamisku slotu",
+            "Regulāri cashback un bonusu piedāvājumi",
+            "Jauni sloti bieži pirms tie kļūst populāri citur"
+          ],
+          "url": "https://snatchcasino.com",
+          "sell_angle": "20 griezieni bez iemaksas — viens no labākajiem veidiem, kā notestēt kazino bez riska. Ja patīk, platforma piedāvā labus turpmākos bonusus.",
+          "urgency": null
+        },
+        {
+          "id": "immerion_lv",
+          "name": "Immerion",
+          "type": "casino",
+          "status": "active",
+          "pinned": false,
+          "welcome_offer": "400% bonusu līdz 4000€ + 250 bezmaksas griezieni + 20 bez depozīta",
+          "bonus_amount": 4000,
+          "bonus_type": "welcome_deposit",
+          "nodeposit_spins": 20,
+          "free_spins": 250,
+          "key_features": [
+            "400% bonuss līdz €4000",
+            "250 bezmaksas griezieni",
+            "20 bezmaksas griezieni bez depozīta",
+            "High RTP sloti: Tiger Jungle 96.40%"
+          ],
+          "url": "https://immerion.com",
+          "sell_angle": "400% bonuss nozīmē, ka €100 kļūst €500 spēlei. Papildus 250 griezieni — pietiekami, lai sajustu platformu bez stresa.",
+          "urgency": null
+        },
+        {
+          "id": "gizbo_lv",
+          "name": "Gizbo Casino",
+          "type": "casino",
+          "status": "active",
+          "pinned": false,
+          "welcome_offer": "Bonuss + otrā depozīta piedāvājums",
+          "key_features": [
+            "Droši maksājumi caur Latvijas bankām",
+            "Vairāk nekā 10 000 spēļu",
+            "70 populārāko spēļu piegādātāju",
+            "Personalizēti piedāvājumi",
+            "Plinko spēle — īsākas sesijas, ātrāki bonusu triggeri"
+          ],
+          "url": "https://kazinoguru.lv/gizbo",
+          "sell_angle": "Latvijas banku maksājumi bez komplikācijām — liels pluss vietējiem. 10 000+ spēļu nozīmē vienmēr ir ko atrast.",
+          "urgency": null
+        },
+        {
+          "id": "iwild_lv",
+          "name": "iWild Casino",
+          "type": "casino",
+          "status": "active",
+          "pinned": false,
+          "welcome_offer": "550% + 400 bezmaksas griezieni",
+          "bonus_amount_pct": 550,
+          "free_spins": 400,
+          "nodeposit_spins": 20,
+          "key_features": [
+            "550% welcome pakete",
+            "400 bezmaksas griezieni",
+            "20 bezmaksas griezieni bez depozīta",
+            "Populārs Latvijas spēlētāju vidū"
+          ],
+          "url": "https://iwildcasino.com",
+          "sell_angle": "550% ir viens no lielākajiem match bonusiem tirgū. 400 griezieni — daudz vietas izmēģināt dažādus slotus.",
+          "urgency": "Ierobežots laika piedāvājums"
+        }
+      ]
+    },
+
+    "LuckyGuru": {
+      "telegram": "@luckycasinoguru",
+      "geo": ["LT"],
+      "interest": "casino",
+      "language": "lt",
+      "description": "Didžiausios kazino premijos — lietuviams",
+      "channel_value_prop": "Didžiausios kazino premijos Lietuvoje. Testuojame prieš rekomenduodami.",
+      "products": [
+        {
+          "id": "beef_lt",
+          "name": "Beef Casino",
+          "type": "casino",
+          "status": "active",
+          "pinned": true,
+          "welcome_offer": "125% bonusas + iki 600 nemokamų sukimų, minimalus depozitas: 20€",
+          "bonus_amount_pct": 125,
+          "free_spins": 600,
+          "min_deposit": 20,
+          "key_features": [
+            "125% welcome bonusas",
+            "Iki 600 nemokamų sukimų",
+            "Minimalus depozitas tik 20€",
+            "Aktyvuok per kanalą"
+          ],
+          "url": "https://casinoguru.lt/beef.casino",
+          "sell_angle": "600 sukimų su 125% bonusu ir tik 20€ minimaliu depozitu — žemas įėjimo barjeras su rimtu vertės kiekiu.",
+          "urgency": null
+        },
+        {
+          "id": "royspins_lt",
+          "name": "Royspins",
+          "type": "casino",
+          "status": "active",
+          "pinned": false,
+          "welcome_offer": "250% iki 2000€ + 200 sukimų",
+          "bonus_amount": 2000,
+          "bonus_type": "welcome_deposit",
+          "free_spins": 200,
+          "key_features": [
+            "250% bonusas iki €2000",
+            "200 nemokamų sukimų",
+            "Virš 6000 žaidimų iš 40+ tiekėjų",
+            "Live kazino, džekpotai, Megaways",
+            "Crypto žaidėjams atskiri bonusai",
+            "Withdrawals per 24h"
+          ],
+          "url": "https://royspins.com",
+          "sell_angle": "6000+ žaidimų su greitu išmokėjimu — jei esi rimtas žaidėjas, čia neišnaudosi visko per savaitę.",
+          "urgency": null
+        },
+        {
+          "id": "iris_lt",
+          "name": "Iris Casino",
+          "type": "casino",
+          "status": "active",
+          "pinned": false,
+          "welcome_offer": "Iki 250% + VIP klubas + cashback + 100 nemokamų sukimų (kodas: GURU)",
+          "bonus_amount_pct": 250,
+          "nodeposit_spins": 100,
+          "promo_code": "GURU",
+          "key_features": [
+            "250% welcome bonusas",
+            "VIP klubas ir asmeniniai rewards nuo pirmų dienų",
+            "Cashback ir greiti išmokėjimai",
+            "100 nemokamų sukimų su kodu GURU",
+            "Išskirtinė prieiga prie exclusive žaidimų tik mūsų bendruomenei"
+          ],
+          "url": "https://casinoguru.lt/iris.casino",
+          "sell_angle": "Naujas kazino su VIP programa nuo pirmų dienų — tai reta. 100 sukimų su kodu GURU be papildomų sąlygų.",
+          "urgency": "Bonusas galioja iki gegužės 18 dienos"
+        }
+      ]
     }
   },
 
   "geo_routing": {
     "ES": {
-      "betting": "ApuestasGuruES",
-      "casino": "ApuestasGuruES",
+      "betting":   "ApuestasGuruES",
+      "casino":    "ApuestasGuruES",
       "nodeposit": "ApuestasGuruES",
       "exclusive": "ApuestasGuruES"
     },
     "HR": {
-      "betting": "BetCroatia",
-      "casino": "BalkanJackpot",
+      "betting":   "BetCroatia",
+      "casino":    "BalkanJackpot",
       "nodeposit": "BalkanJackpot",
       "exclusive": "BetCroatia"
     },
     "RS": {
-      "betting": "BetCroatia",
-      "casino": "BalkanJackpot",
+      "betting":   "BetCroatia",
+      "casino":    "BalkanJackpot",
       "nodeposit": "BalkanJackpot",
       "exclusive": "BetCroatia"
     },
     "BA": {
-      "betting": "BetCroatia",
-      "casino": "BalkanJackpot",
+      "betting":   "BetCroatia",
+      "casino":    "BalkanJackpot",
       "nodeposit": "BalkanJackpot",
       "exclusive": "BetCroatia"
     },
+    "LV": {
+      "betting":   "LuckyLatvia",
+      "casino":    "LuckyLatvia",
+      "nodeposit": "LuckyLatvia",
+      "exclusive": "LuckyLatvia"
+    },
+    "LT": {
+      "betting":   "LuckyGuru",
+      "casino":    "LuckyGuru",
+      "nodeposit": "LuckyGuru",
+      "exclusive": "LuckyGuru"
+    },
     "OTHER": {
-      "betting": "ApuestasGuruES",
-      "casino": "BalkanJackpot",
+      "betting":   "ApuestasGuruES",
+      "casino":    "BalkanJackpot",
       "nodeposit": "BalkanJackpot",
       "exclusive": "ApuestasGuruES"
     }
