@@ -33,5 +33,5 @@ def _load_images(base="assets/images"):
 
 INTEREST_IMAGES: dict[str, list[str]] = _load_images()
 
-AI_MAX_HISTORY = 20
+AI_MAX_HISTORY = 30
 AI_MAX_TOKENS  = 400
