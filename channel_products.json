@@ -1,0 +1,228 @@
+{
+  "_comment": "Продукты по каналам. Обновляй вручную когда меняются офферы на канале.",
+  "_last_updated": "2026-05-16",
+
+  "channels": {
+
+    "ApuestasGuruES": {
+      "telegram": "@ApuestasGuruES",
+      "geo": ["ES"],
+      "interest": "betting",
+      "language": "es",
+      "description": "Pronósticos deportivos con análisis — La Liga, Champions, Premier League",
+      "channel_value_prop": "Señales con análisis real. No suerte — sistema. +227€ en mayo con picks documentados.",
+      "products": [
+        {
+          "id": "29black_es",
+          "name": "29Black",
+          "type": "sportsbook",
+          "status": "active",
+          "pinned": true,
+          "welcome_offer": "200% hasta 500€ + 10% freebet hasta 10.000€",
+          "bonus_amount": 500,
+          "bonus_type": "welcome_deposit",
+          "freebet_amount": 10000,
+          "key_features": [
+            "Registro en 1 minuto",
+            "Interfaz sencilla",
+            "Buenas cuotas en eventos top",
+            "Freebet del 10% continuo"
+          ],
+          "url": "https://29black.com",
+          "sell_angle": "El bono inicial de 200% te da margen para arrancar con valor desde el primer día. La freebet del 10% sigue funcionando en cada apuesta.",
+          "urgency": "Activa el bono antes de que lo bajen"
+        },
+        {
+          "id": "cleobetra_es",
+          "name": "Cleobetra",
+          "type": "sportsbook",
+          "status": "active",
+          "pinned": false,
+          "welcome_offer": "+2.000 mercados para apostar",
+          "key_features": [
+            "Más de 2000 mercados",
+            "Casa nueva pisando fuerte"
+          ],
+          "url": "https://cleobetra.com",
+          "sell_angle": "Casa nueva con mercados amplios — las casas nuevas suelen tener cuotas más generosas para captar usuarios."
+        }
+      ]
+    },
+
+    "BetCroatia": {
+      "telegram": "@bet_croatia",
+      "geo": ["HR", "RS"],
+      "interest": "betting",
+      "language": "hr",
+      "description": "No luck. Just strategy, stats, and profit. HNL i europska natjecanja.",
+      "channel_value_prop": "Picks s analizom za HNL i europska natjecanja. Transparentni rezultati, bez pretplate.",
+      "products": [
+        {
+          "id": "betrepublic_hr",
+          "name": "BetRepublic",
+          "type": "sportsbook",
+          "status": "active",
+          "pinned": true,
+          "welcome_offer": "Registracija kroz partner link — bez pretplate, zadržavaš dobitke",
+          "key_features": [
+            "Sve klađenje za HNL i europska natjecanja",
+            "Koristi se u kanalu za sve pickove",
+            "Bez skrivenih naknada"
+          ],
+          "url": "https://betrepublic.com",
+          "sell_angle": "Sve pick u kanalu stavljamo na BetRepublic. Registriraj se tamo gdje pratimo — lakše pratiš naše analize i kupleš iste kurierse.",
+          "urgency": null
+        },
+        {
+          "id": "immerion_hr",
+          "name": "Immerion",
+          "type": "casino",
+          "status": "active",
+          "pinned": false,
+          "welcome_offer": "20 free spins bez depozita + 250% do €4.000",
+          "bonus_amount": 4000,
+          "bonus_type": "welcome_deposit",
+          "nodeposit_spins": 20,
+          "key_features": [
+            "20 free spins bez uplate",
+            "250% bonus do 4000€",
+            "Sigurno i pogodno za igranje",
+            "High RTP slotovi: All Lucky Clovers 97%, Wolf Gold 96%"
+          ],
+          "url": "https://geek.hr/immerion",
+          "sell_angle": "20 free spina bez uplate — nula rizika za početak. Ako ti se svidi, bonus od 250% daje pravi prostor za igru.",
+          "urgency": "Aktiviraj bonus i isprobaj bez rizika"
+        }
+      ]
+    },
+
+    "BalkanJackpot": {
+      "telegram": "@BalkanJackpot",
+      "geo": ["HR", "RS", "BA"],
+      "interest": "casino",
+      "language": "hr",
+      "description": "Casino picks, slot reviews, win screenshots — Balkans",
+      "channel_value_prop": "Testiramo kazina i bonuse prije nego vi ulažete. Hottest wins, slot RTP analiza, promo prozori.",
+      "products": [
+        {
+          "id": "slotsvader_balkan",
+          "name": "Slotsvader",
+          "type": "casino",
+          "status": "active",
+          "pinned": true,
+          "welcome_offer": "Jedan od jačih welcome deala trenutno",
+          "key_features": [
+            "Pinned kao glavni ofer na kanalu",
+            "Jak welcome deal s dobrom vrijednošću"
+          ],
+          "url": "https://geek.hr/slotsvader",
+          "sell_angle": "Ovo je naša trenutna preporuka #1 — pinali smo je jer ima dovoljno vrijednosti za pravi run od početka.",
+          "urgency": "Aktiviraj danas"
+        },
+        {
+          "id": "winshark_balkan",
+          "name": "WinShark",
+          "type": "casino",
+          "status": "active",
+          "pinned": false,
+          "welcome_offer": "240% do €2.500 + 300 Free Spins",
+          "bonus_amount": 2500,
+          "bonus_type": "welcome_deposit",
+          "free_spins": 300,
+          "key_features": [
+            "240% match bonus",
+            "300 free spinova",
+            "Vrijedi do 18. maja"
+          ],
+          "url": "https://geek.hr/winshark",
+          "sell_angle": "240% znači da €100 postaje €340 za igru. 300 spinova povrh toga — dovoljno da uhvatiš bonus round bez stresa.",
+          "urgency": "Valid until May 18"
+        },
+        {
+          "id": "midarion_balkan",
+          "name": "Midarion",
+          "type": "casino",
+          "status": "active",
+          "pinned": false,
+          "welcome_offer": "Registracija + bonus",
+          "key_features": [
+            "Lokalna plaćanja rade glatko",
+            "Mobilna verzija stvarno čista",
+            "Bez dosadnih popupa",
+            "Real win: +123€ od 20€ depozita na Zeus Ze Zekond"
+          ],
+          "url": "https://geek.hr/midarion",
+          "sell_angle": "Testirali smo nekoliko dana — lokalne uplate rade bez komplikacija, mobilna verzija ne boli nakon 15 minuta igranja.",
+          "urgency": null
+        },
+        {
+          "id": "immerion_balkan",
+          "name": "Immerion",
+          "type": "casino",
+          "status": "active",
+          "pinned": false,
+          "welcome_offer": "20 free spins bez depozita + 250% do €4.000",
+          "bonus_amount": 4000,
+          "bonus_type": "welcome_deposit",
+          "nodeposit_spins": 20,
+          "key_features": [
+            "20 free spina bez uplate",
+            "High RTP: All Lucky Clovers 97%, Mummyland 96.36%, Wolf Gold 96.01%",
+            "250% bonus do 4000€"
+          ],
+          "url": "https://geek.hr/immerion",
+          "sell_angle": "Ako igraš slotove, RTP je važan. Ovi imaju 96-97% — to je gornja polica. 20 spina bez uplate da provjeriš osjećaj.",
+          "urgency": null
+        },
+        {
+          "id": "iwild_balkan",
+          "name": "iWild Casino",
+          "type": "casino",
+          "status": "active",
+          "pinned": false,
+          "welcome_offer": "Bonus + novi slotovi",
+          "key_features": [
+            "Redovno dodaju nove slotove",
+            "Dobar izbor za slot entuzijaste"
+          ],
+          "url": "https://iwildcasino.com",
+          "sell_angle": "Stalno dodaju nove igre — ako voliš biti prvi na novim slotovima, ovo je mjesto.",
+          "urgency": null
+        }
+      ]
+    }
+  },
+
+  "geo_routing": {
+    "ES": {
+      "betting": "ApuestasGuruES",
+      "casino": "ApuestasGuruES",
+      "nodeposit": "ApuestasGuruES",
+      "exclusive": "ApuestasGuruES"
+    },
+    "HR": {
+      "betting": "BetCroatia",
+      "casino": "BalkanJackpot",
+      "nodeposit": "BalkanJackpot",
+      "exclusive": "BetCroatia"
+    },
+    "RS": {
+      "betting": "BetCroatia",
+      "casino": "BalkanJackpot",
+      "nodeposit": "BalkanJackpot",
+      "exclusive": "BetCroatia"
+    },
+    "BA": {
+      "betting": "BetCroatia",
+      "casino": "BalkanJackpot",
+      "nodeposit": "BalkanJackpot",
+      "exclusive": "BetCroatia"
+    },
+    "OTHER": {
+      "betting": "ApuestasGuruES",
+      "casino": "BalkanJackpot",
+      "nodeposit": "BalkanJackpot",
+      "exclusive": "ApuestasGuruES"
+    }
+  }
+}
