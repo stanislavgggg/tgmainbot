@@ -295,6 +295,8 @@ async def user_joined(update: Update, context: ContextTypes.DEFAULT_TYPE):
     opener = get_post_sub_opener(lang, interest, ab_variant) or M.get(M.POST_SUB, lang, interest)
     await context.bot.send_message(
         chat_id=chat_id, text=opener, parse_mode=ParseMode.MARKDOWN)
+    # Сохраняем opener в историю — иначе generate_step1 не видит что уже сказали
+    add_ai_message(user_id, "assistant", opener)
 
     schedule_onboarding(
         job_queue=context.job_queue, user_id=user_id,
@@ -409,7 +411,6 @@ def _detect_lang_switch(text: str):
 # ════════════════════════════════════════════════════════════════════════════
 async def _handle_warming(update, context, user_id, lang, interest, geo, user_text, user):
     chat_id    = update.effective_chat.id
-    history    = get_ai_history(user_id)
     replies    = user.get("stage_replies", 0) + 1
     funnel     = user.get("funnel_stage", "discovery")
     psychotype = get_psychotype(user_id)
@@ -420,6 +421,10 @@ async def _handle_warming(update, context, user_id, lang, interest, geo, user_te
     obj_type = classify_objection(user_text)
     if obj_type:
         log_objection(user_id, obj_type)
+
+    # Записываем сообщение юзера ДО чтения истории и вызова AI
+    add_ai_message(user_id, "user", user_text)
+    history = get_ai_history(user_id)  # включает user_text
 
     # Инкрементируем угол атаки — AI знает на каком шаге разговор
     current_angle = user.get("current_angle", 0)
@@ -442,7 +447,7 @@ async def _handle_warming(update, context, user_id, lang, interest, geo, user_te
     )
 
     response = result["text"]
-    add_ai_message(user_id, "user", user_text)
+    # user_text уже записан выше — только пишем ответ ассистента
     add_ai_message(user_id, "assistant", response)
     add_tone(user_id, detect_tone(user_text, history))
 
@@ -496,11 +501,13 @@ async def _handle_warming(update, context, user_id, lang, interest, geo, user_te
 # ════════════════════════════════════════════════════════════════════════════
 async def _handle_tease(update, context, user_id, lang, interest, geo, user_text):
     chat_id    = update.effective_chat.id
-    history    = get_ai_history(user_id)
     psychotype = get_psychotype(user_id)
     objections = get_objections(user_id)
     profile    = get_profile(user_id)
     psychotype, objections = _prepare_context(user_id, user_text)[0], get_objections(user_id)
+
+    add_ai_message(user_id, "user", user_text)
+    history = get_ai_history(user_id)
 
     await context.bot.send_chat_action(chat_id, "typing")
     result = await ask_valeria_conversational(
@@ -509,7 +516,6 @@ async def _handle_tease(update, context, user_id, lang, interest, geo, user_text
         psychotype=psychotype, user_profile=profile, objections=objections)
 
     response = result["text"]
-    add_ai_message(user_id, "user", user_text)
     add_ai_message(user_id, "assistant", response)
     add_tone(user_id, detect_tone(user_text, history))
 
@@ -522,10 +528,12 @@ async def _handle_tease(update, context, user_id, lang, interest, geo, user_text
 
 async def _handle_cta(update, context, user_id, lang, interest, geo, user_text):
     chat_id    = update.effective_chat.id
-    history    = get_ai_history(user_id)
     user       = get_user(user_id)
     psychotype, objections = _prepare_context(user_id, user_text)[0], get_objections(user_id)
     profile    = get_profile(user_id)
+
+    add_ai_message(user_id, "user", user_text)
+    history = get_ai_history(user_id)
 
     await context.bot.send_chat_action(chat_id, "typing")
     result = await ask_valeria_conversational(
@@ -534,7 +542,6 @@ async def _handle_cta(update, context, user_id, lang, interest, geo, user_text):
         psychotype=psychotype, user_profile=profile, objections=objections)
 
     response = result["text"]
-    add_ai_message(user_id, "user", user_text)
     add_ai_message(user_id, "assistant", response)
     add_tone(user_id, detect_tone(user_text, history))
 
@@ -571,7 +578,6 @@ async def _handle_ai_chat(update, context, user_id, lang, interest, geo, user_te
     )
 
     chat_id    = update.effective_chat.id
-    history    = get_ai_history(user_id)
     msg_count  = user.get("ai_msg_count", 0)
     psychotype = get_psychotype(user_id)
     objections = get_objections(user_id)
@@ -584,6 +590,7 @@ async def _handle_ai_chat(update, context, user_id, lang, interest, geo, user_te
         log_objection(user_id, obj_type)
 
     add_ai_message(user_id, "user", user_text)
+    history = get_ai_history(user_id)  # читаем ПОСЛЕ add — включает user_text
     new_msg_count = msg_count + 1
     update_user(user_id, ai_msg_count=new_msg_count,
                 last_user_message_at=datetime.now(timezone.utc).isoformat())
