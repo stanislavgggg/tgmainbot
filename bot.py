@@ -1,13 +1,12 @@
 """
-bot.py — OddsVault Bot v10
+bot.py — OddsVault Bot v14
 
-ИСПРАВЛЕНИЯ:
-  1. /start: HOOK (представление Валерии) → пауза → QUIZ. Не объединять в одно.
-  2. GEO-квиз: отправляется через send_message (не edit), timeout увеличен
-  3. Fallback не повторяется бесконечно: счётчик fallback_count, после 2 → переходим к tease
-  4. API key диагностика при старте — видно сразу если не прописан
-  5. handle_message логирует каждый входящий запрос для отладки
-  6. ask_valeria: логирует реальную ошибку API, не глотает молча
+Архитектура:
+  - Диалоговый flow (conversation.py) вместо скриптов
+  - 21 сценарий (scenarios.py) покрывает все пользовательские пути
+  - Адаптивный онбординг с классификатором барьера (ftd_onboarding.py)
+  - FTD celebration + repeat machine
+  - Daily signal, Adrenaline mode, A/B тест, Bonus calculator, Referral
 """
 import asyncio, logging, os, random, sys, atexit
 from datetime import datetime, timezone
@@ -16,40 +15,32 @@ from telegram.constants import ParseMode
 from telegram.error import TelegramError
 from telegram.ext import (Application, CallbackQueryHandler, CommandHandler,
                           ContextTypes, MessageHandler, filters)
-from config import (BOT_TOKEN, FTD_PUSH_EVERY, IMAGE_EVERY_N, INTEREST_IMAGES,
-                    REENGAGE_DELAY_1, REENGAGE_DELAY_2, State)
+from config import BOT_TOKEN, State
 from storage import (add_ai_message, add_tone, get_all_users, get_ai_history, get_user,
                      update_user, mark_push_sent, classify_objection, log_objection,
-                     get_objections, update_psychotype, get_psychotype, get_used_techniques,
-                     log_technique, get_profile, update_profile)
-from ai_agent import (ask_valeria, detect_tone, generate_warm_opener, get_commitment_question,
-                      respond_to_commitment, generate_post_sub_hook, generate_reengage_message,
-                      extract_profile_update)
+                     get_objections, update_psychotype, get_psychotype,
+                     get_profile, update_profile)
+from ai_agent import detect_tone, extract_profile_update, ANTHROPIC_KEY
 from membership import (check_membership, MemberStatus, resolve_channel, resolve_lang,
                         infer_geo_from_tg_lang, get_channel_link, get_channel_title,
-                        GEO_QUIZ, fetch_channel_ids)
-from scenarios import (classify_post_ftd_message, detect_win_signal, detect_loss_signal,
-                        detect_return_signal, get_win_response, get_loss_response,
+                        fetch_channel_ids)
+from scenarios import (classify_post_ftd_message, get_win_response, get_loss_response,
                         get_vip_message, get_returning_opener, VIP_FTD_THRESHOLD)
 from conversation import (ask_valeria_conversational, get_post_sub_opener,
                            get_silence_push, should_send_silence_push,
-                           detect_interest_from_text, detect_geo_from_text,
-                           OPENING_QUESTION)
-from ftd_onboarding import (schedule_onboarding, schedule_ftd_flow,
-                             detect_ftd_signal)
+                           detect_interest_from_text, detect_geo_from_text)
+from ftd_onboarding import schedule_onboarding, schedule_ftd_flow, detect_ftd_signal
 from daily_signal import daily_signal_job
 from ab_test import (assign_variant, get_hook_text, track_event,
-                     get_ab_stats, format_ab_stats_message, VARIANT_C_SKIPS_HOOK)
+                     get_ab_stats, format_ab_stats_message)
 from bonus_calculator import (should_show_calculator, get_calculator_trigger_text,
                                get_calc_intro, get_deposit_buttons, get_stake_buttons,
                                format_casino_result, format_betting_result, parse_deposit_callback)
 from referral import (should_offer_referral, get_referral_offer_text,
                        track_referral_offer, track_referral_click,
-                       get_referrer_from_start, get_thanks_text, is_positive_message)
-from adrenaline import adrenaline_check_job, get_odds_api_status
+                       get_referrer_from_start, is_positive_message)
+from adrenaline import adrenaline_check_job
 import messages as M
-from config import ANTHROPIC_KEY
-
 logging.basicConfig(format="%(asctime)s [%(levelname)s] %(name)s: %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -68,17 +59,6 @@ _check_lock()
 # ── Helpers ───────────────────────────────────────────────────────────────────
 def _typing_delay(text): return round(1.2 + min(len(text)/140, 2.0), 1)
 
-async def _send_image(context, chat_id, interest, caption=""):
-    images = INTEREST_IMAGES.get(interest) or INTEREST_IMAGES.get("betting", [])
-    if not images: return False
-    try:
-        with open(random.choice(images), "rb") as photo:
-            await context.bot.send_photo(chat_id=chat_id, photo=photo,
-                caption=caption or None, parse_mode=ParseMode.MARKDOWN if caption else None)
-        return True
-    except (FileNotFoundError, TelegramError) as e:
-        logger.warning(f"Image failed: {e}"); return False
-
 def _cta_keyboard(lang, interest, geo):
     channel = resolve_channel(geo, interest)
     if channel:
@@ -96,7 +76,7 @@ def _cta_keyboard(lang, interest, geo):
 def _prepare_context(user_id, user_text):
     obj = classify_objection(user_text)
     if obj: log_objection(user_id, obj)
-    return update_psychotype(user_id, user_text), get_objections(user_id), get_used_techniques(user_id)
+    return update_psychotype(user_id, user_text), get_objections(user_id)
 
 async def _send_tease(bot, user_id, chat_id, lang, interest, geo="OTHER", job_queue=None):
     """
@@ -245,134 +225,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 
-# ════════════════════════════════════════════════════════════════════════════
-#  Выбор интереса → GEO-квиз
-# ════════════════════════════════════════════════════════════════════════════
-async def interest_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query    = update.callback_query
-    await query.answer()
-    interest = query.data[len("int_"):]
-    user_id  = query.from_user.id
-    user     = get_user(user_id)
-    lang     = user.get("lang", "en")
-    chat_id  = query.message.chat_id
-
-    update_user(user_id, interest=interest, state=State.QUIZ)
-    logger.info(f"INTEREST user={user_id} interest={interest} lang={lang}")
-    track_event(user_id, "quiz_answered")
-
-    # Подтверждение выбора
-    ack = M.QUIZ_ACK.get(lang, M.QUIZ_ACK.get("en", "Got it."))
-    try:
-        await query.edit_message_text(ack, parse_mode=ParseMode.MARKDOWN)
-    except Exception:
-        pass
-
-    # GEO-квиз — НОВОЕ сообщение (не edit, чтобы точно пришло)
-    await asyncio.sleep(0.6)
-    await context.bot.send_chat_action(chat_id, "typing")
-    await asyncio.sleep(0.8)
-
-    geo_q = GEO_QUIZ.get(lang, GEO_QUIZ["en"])
-    kb    = [[InlineKeyboardButton(lbl, callback_data=cb)] for lbl, cb in geo_q["buttons"]]
-    await context.bot.send_message(
-        chat_id=chat_id,
-        text=geo_q["text"],
-        parse_mode=ParseMode.MARKDOWN,
-        reply_markup=InlineKeyboardMarkup(kb))
-
-
-# ════════════════════════════════════════════════════════════════════════════
-#  Выбор ГЕО → AI opener → WARM1
-# ════════════════════════════════════════════════════════════════════════════
-async def geo_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query   = update.callback_query
-    await query.answer()
-    geo     = query.data[len("geo_"):]
-    user_id = query.from_user.id
-    user    = get_user(user_id)
-    tg_lang = update.effective_user.language_code
-    chat_id = query.message.chat_id
-
-    lang     = resolve_lang(geo, tg_lang)
-    interest = user.get("interest", "betting")
-
-    update_user(user_id,
-        geo=geo, lang=lang,
-        state=State.WARM1, funnel_stage="warming",
-        stage_replies=0, ai_msg_count=0,
-        commitment_sent=False, fallback_count=0)
-
-    logger.info(f"GEO user={user_id} geo={geo} lang={lang} interest={interest}")
-
-    # Подтверждение ГЕО
-    geo_ack_map = {
-        "ES":    {"es": "🇪🇸 España — perfecto.",           "en": "🇪🇸 Spain — perfect."},
-        "HR":    {"hr": "🇭🇷 Hrvatska — odlično.",          "en": "🇭🇷 Croatia — great."},
-        "RS":    {"hr": "🇷🇸 Srbija / Balkan — odlično.",   "en": "🇷🇸 Serbia / Balkan — great."},
-        "LT":    {"lt": "🇱🇹 Lietuva — puiku.",             "en": "🇱🇹 Lithuania — great."},
-        "LV":    {"lv": "🇱🇻 Latvija — lieliski.",          "en": "🇱🇻 Latvia — great."},
-        "OTHER": {"en": "🌍 Got it — I'll keep it broad."},
-    }
-    ack_map  = geo_ack_map.get(geo, geo_ack_map["OTHER"])
-    ack_text = ack_map.get(lang, ack_map.get("en", "Got it."))
-    try:
-        await query.edit_message_text(ack_text, parse_mode=ParseMode.MARKDOWN)
-    except Exception:
-        pass
-
-    # AI opener
-    await asyncio.sleep(0.4)
-    await context.bot.send_chat_action(chat_id, "typing")
-
-    profile = get_profile(user_id)
-    opener  = await generate_warm_opener(lang=lang, interest=interest, geo=geo, user_profile=profile)
-    add_ai_message(user_id, "assistant", opener)
-
-    # stage_replies=1 т.к. opener уже считается первым сообщением Валерии
-    # Это не даст повторить ту же фразу при первом ответе пользователя
-    update_user(user_id, stage_replies=1, opener_sent=True)
-
-    await asyncio.sleep(_typing_delay(opener) * 0.5)
-    await context.bot.send_message(chat_id=chat_id, text=opener, parse_mode=ParseMode.MARKDOWN)
-
-
-# ════════════════════════════════════════════════════════════════════════════
-#  Commitment buttons
-# ════════════════════════════════════════════════════════════════════════════
-async def commitment_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query   = update.callback_query
-    await query.answer()
-    full_cb = query.data
-    user_id = query.from_user.id
-    user    = get_user(user_id)
-    lang    = user.get("lang", "en")
-    interest= user.get("interest", "betting")
-    geo     = user.get("geo", "OTHER")
-    chat_id = query.message.chat_id
-
-    replies = user.get("stage_replies", 0) + 1
-    update_user(user_id, commitment_sent=True, stage_replies=replies)
-
-    try:
-        await query.edit_message_reply_markup(reply_markup=None)
-    except Exception:
-        pass
-
-    await context.bot.send_chat_action(chat_id, "typing")
-    response = await respond_to_commitment(
-        full_cb, lang, interest, get_ai_history(user_id),
-        get_psychotype(user_id), get_profile(user_id))
-    add_ai_message(user_id, "assistant", response)
-
-    await asyncio.sleep(_typing_delay(response) * 0.5)
-    await context.bot.send_message(chat_id=chat_id, text=response, parse_mode=ParseMode.MARKDOWN)
-
-    # После commitment → tease
-    await asyncio.sleep(2.5)
-    user_geo = get_user(user_id).get("geo", "OTHER")
-    await _send_tease(context.bot, user_id, chat_id, lang, interest, geo=user_geo, job_queue=context.job_queue)
-
 
 # ════════════════════════════════════════════════════════════════════════════
 #  "Уже вступил" → проверка подписки
@@ -403,64 +255,23 @@ async def user_joined(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "lv": "Hmm, izskatās ka vēl neesi iekšā. Pievienojies vispirms un atgriezies. 👇",
         }
         await context.bot.send_message(
-            chat_id=chat_id,
-            text=not_yet.get(lang, not_yet["en"]),
+            chat_id=chat_id, text=not_yet.get(lang, not_yet["en"]),
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=_cta_keyboard(lang, interest, geo))
         return
-
-    # Трекаем клик на канал — останавливает онбординг пуши
-    track_channel_click(user_id)
 
     update_user(user_id, state=State.AI_CHAT, funnel_stage="subscribed", verified_member=True)
     await context.bot.send_chat_action(chat_id, "typing")
     await asyncio.sleep(1.5)
 
-    # Живой opener — начинает диалог, не "Well done"
-    opener = get_post_sub_opener(lang, interest)
-    if not opener:
-        opener = M.get(M.POST_SUB, lang, interest)
+    opener = get_post_sub_opener(lang, interest) or M.get(M.POST_SUB, lang, interest)
     await context.bot.send_message(
         chat_id=chat_id, text=opener, parse_mode=ParseMode.MARKDOWN)
 
-    # Онбординг запускается но умно — пуши отменяются если юзер активен
     schedule_onboarding(
-        job_queue=context.job_queue,
-        user_id=user_id,
-        chat_id=chat_id,
-        lang=lang,
-        interest=interest,
-    )
-    logger.info(f"Onboarding started → {user_id} [{lang}/{interest}/{geo}]")
-
-
-# ════════════════════════════════════════════════════════════════════════════
-#  Fallback lang buttons (если показывались)
-# ════════════════════════════════════════════════════════════════════════════
-async def lang_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query   = update.callback_query
-    await query.answer()
-    lang    = query.data[len("lang_"):]
-    user_id = query.from_user.id
-    chat_id = query.message.chat_id
-
-    update_user(user_id, lang=lang, state=State.QUIZ)
-
-    # Убираем кнопки языков с фото (edit_message_reply_markup работает для фото)
-    try:
-        await query.edit_message_reply_markup(reply_markup=None)
-    except Exception:
-        pass
-
-    # Отправляем QUIZ новым сообщением (нельзя edit_message_text на photo)
-    quiz = M.QUIZ.get(lang, M.QUIZ.get("en", "What interests you?"))
-    btns = M.QUIZ_BUTTONS.get(lang, M.QUIZ_BUTTONS.get("en", []))
-    kb   = [[InlineKeyboardButton(lbl, callback_data=cb)] for lbl, cb in btns]
-    await context.bot.send_message(
-        chat_id=chat_id,
-        text=quiz,
-        parse_mode=ParseMode.MARKDOWN,
-        reply_markup=InlineKeyboardMarkup(kb))
+        job_queue=context.job_queue, user_id=user_id,
+        chat_id=chat_id, lang=lang, interest=interest)
+    logger.info(f"Subscribed → {user_id} [{lang}/{interest}/{geo}]")
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -483,55 +294,29 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     geo      = user.get("geo", "OTHER")
 
     # ── Детектор ГЕО из текста (если пользователь написал страну) ────────────
-    # Работает в любом состоянии — обновляет канал и язык на правильные
-    if geo in ("OTHER", "") and state not in (State.LANG, State.QUIZ):
-        detected_geo = _detect_geo_from_text(user_text)
+    # Детектор GEO из текста — обновляем если ещё не определили
+    if geo in ("OTHER", ""):
+        detected_geo = detect_geo_from_text(user_text)
         if detected_geo and detected_geo != geo:
             new_lang = resolve_lang(detected_geo)
             update_user(user_id, geo=detected_geo, lang=new_lang)
-            geo  = detected_geo
-            lang = new_lang
-            logger.info(f"GEO detected from text: {detected_geo} → lang={new_lang}")
+            geo = detected_geo; lang = new_lang
+            logger.info(f"GEO from text: {detected_geo} → lang={new_lang}")
 
     # Silent profile update
     if len(user_text) > 8:
         asyncio.create_task(_update_profile_silent(user_id, user_text, lang))
 
-    # ── Детектор переключения языка (в любом состоянии) ──────────────────────
+    # Детектор переключения языка
     new_lang = _detect_lang_switch(user_text)
     if new_lang and new_lang != lang:
-        update_user(user_id, lang=new_lang)
-        lang = new_lang
-        ack_switch = {
-            "en": "Switching to English — got it. 👌",
-            "es": "Cambio al español — entendido. 👌",
-            "hr": "Prelazim na hrvatski — razumijem. 👌",
-            "lt": "Pereinu į lietuvių — suprantu. 👌",
-            "lv": "Pāreju uz latviešu — saprotu. 👌",
-        }
-        await update.message.reply_text(ack_switch.get(new_lang, "Switching language. 👌"))
-        # Если в квизе — перезапускаем кнопки на новом языке
-        if state in (State.LANG, State.QUIZ):
-            quiz_text = M.QUIZ.get(new_lang, M.QUIZ.get("en", ""))
-            btns      = M.QUIZ_BUTTONS.get(new_lang, M.QUIZ_BUTTONS.get("en", []))
-            kb        = [[InlineKeyboardButton(lbl, callback_data=cb)] for lbl, cb in btns]
-            await context.bot.send_message(
-                chat_id=update.effective_chat.id,
-                text=quiz_text, parse_mode=ParseMode.MARKDOWN,
-                reply_markup=InlineKeyboardMarkup(kb))
+        update_user(user_id, lang=new_lang); lang = new_lang
+        ack = {"en":"Switching to English. 👌","es":"Cambio al español. 👌",
+               "hr":"Prelazim na hrvatski. 👌","lt":"Pereinu į lietuvių. 👌","lv":"Pāreju uz latviešu. 👌"}
+        await update.message.reply_text(ack.get(new_lang, "👌"))
         return
 
-    if state in (State.LANG, State.QUIZ):
-        hints = {
-            "en": "Please choose one of the options above 👆",
-            "es": "Por favor elige una de las opciones de arriba 👆",
-            "hr": "Molim odaberi jednu od gornjih opcija 👆",
-            "lt": "Prašome pasirinkite vieną iš aukščiau esančių variantų 👆",
-            "lv": "Lūdzu izvēlies vienu no augstāk esošajām opcijām 👆",
-        }
-        await update.message.reply_text(hints.get(lang, hints["en"]))
-        return
-
+    # Роутинг по состоянию
     if state in (State.WARM1, State.WARM2):
         await _handle_warming(update, context, user_id, lang, interest, geo, user_text, user)
     elif state == State.TEASE:
@@ -539,20 +324,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif state == State.CTA:
         await _handle_cta(update, context, user_id, lang, interest, geo, user_text)
     elif state in (State.AI_CHAT, State.SUBSCRIBED):
-        # FTD детектор — пользователь написал что сделал депозит
         if detect_ftd_signal(user_text):
             ftd_count = user.get("ftd_count", 0) + 1
-            is_new_ftd = not user.get("ftd_done")
             update_user(user_id, ftd_done=True, ftd_count=ftd_count)
-            logger.info(f"FTD {'#1' if is_new_ftd else f'#{ftd_count}'} → {user_id}: {user_text[:40]!r}")
-            schedule_ftd_flow(
-                job_queue=context.job_queue,
-                user_id=user_id,
-                chat_id=update.effective_chat.id,
-                lang=lang,
-                interest=interest,
-            )
+            logger.info(f"FTD #{ftd_count} → {user_id}")
+            schedule_ftd_flow(context.job_queue, user_id,
+                              update.effective_chat.id, lang, interest)
         await _handle_ai_chat(update, context, user_id, lang, interest, geo, user_text, user)
+    else:
+        # Любое неизвестное состояние → warming
+        logger.warning(f"Unknown state={state} for {user_id} → WARM1")
+        update_user(user_id, state=State.WARM1, funnel_stage="discovery")
+        await _handle_warming(update, context, user_id, lang, interest, geo, user_text, user)
 
 
 async def _update_profile_silent(user_id, text, lang):
@@ -601,29 +384,9 @@ def _detect_lang_switch(text: str):
     return None
 
 
-def _detect_geo_from_text(text: str):
-    """
-    Детектирует страну из свободного текста.
-    Если geo=OTHER — обновляем на правильный канал и язык.
-    """
-    t = text.lower()
-    if any(w in t for w in ["spain","españa","espana","spanish","español","madrid","barcelona","seville","valencia","bilbao"]):
-        return "ES"
-    if any(w in t for w in ["croatia","hrvatska","croatian","zagreb","split","dubrovnik","rijeka"]):
-        return "HR"
-    if any(w in t for w in ["serbia","srbija","serbian","belgrade","beograd","novi sad","bosnia","balkan","macedon","montenegro","slovenia"]):
-        return "RS"
-    if any(w in t for w in ["lithuania","lietuva","lithuanian","vilnius","kaunas","klaipeda"]):
-        return "LT"
-    if any(w in t for w in ["latvia","latvija","latvian","riga","daugavpils"]):
-        return "LV"
-    return None
-
 
 # ════════════════════════════════════════════════════════════════════════════
 #  WARMING handler
-#  Ключевое исправление: если API недоступен (нет ключа) — fallback_count растёт,
-#  после 2 fallback'ов принудительно переходим к TEASE с статичным текстом.
 # ════════════════════════════════════════════════════════════════════════════
 async def _handle_warming(update, context, user_id, lang, interest, geo, user_text, user):
     """
@@ -700,75 +463,51 @@ async def _handle_warming(update, context, user_id, lang, interest, geo, user_te
                               geo=geo, job_queue=context.job_queue)
 
 
-def _is_fallback_response(response: str, lang: str) -> bool:
-    fallback_starts = [
-        "There are patterns in how lines move",
-        "Hay patrones en cómo se mueven",
-        "Postoje obrasci u tome kako se kvote",
-        "Yra modeliai kaip koeficientai",
-        "Ir modeļi kā koeficienti",
-    ]
-    return any(response.strip().startswith(s) for s in fallback_starts)
-
-
 # ════════════════════════════════════════════════════════════════════════════
 #  TEASE handler
 # ════════════════════════════════════════════════════════════════════════════
 async def _handle_tease(update, context, user_id, lang, interest, geo, user_text):
-    """
-    Пользователь написал что-то на TEASE этапе.
-    Валерия отвечает на возражение и СРАЗУ переходит в CTA.
-    Нет смысла держать в TEASE — время продавать.
-    """
-    chat_id = update.effective_chat.id
-    history = get_ai_history(user_id)
-    psychotype, objections, used_techniques = _prepare_context(user_id, user_text)
-    profile = get_profile(user_id)
+    """Пользователь ответил на TEASE — обрабатываем возражение → CTA."""
+    chat_id    = update.effective_chat.id
+    history    = get_ai_history(user_id)
+    psychotype = get_psychotype(user_id)
+    objections = get_objections(user_id)
+    profile    = get_profile(user_id)
+    psychotype, objections = _prepare_context(user_id, user_text)[0], get_objections(user_id)
 
     await context.bot.send_chat_action(chat_id, "typing")
-    response, refined, _, technique_used = await ask_valeria(
-        user_message=user_text, history=history, lang=lang, interest=interest,
-        funnel_stage="cta",  # сразу CTA промпт — TEASE уже был показан
-        psychotype=psychotype, objections=objections,
-        used_techniques=used_techniques, geo=geo, user_profile=profile)
+    result = await ask_valeria_conversational(
+        user_message=user_text, history=history, lang=lang,
+        interest=interest, geo=geo, funnel_stage="warming",
+        psychotype=psychotype, user_profile=profile, objections=objections)
 
-    if technique_used: log_technique(user_id, technique_used)
+    response = result["text"]
     add_ai_message(user_id, "user", user_text)
     add_ai_message(user_id, "assistant", response)
     add_tone(user_id, detect_tone(user_text, history))
-    if refined != interest: update_user(user_id, interest=refined); interest = refined
 
     await asyncio.sleep(_typing_delay(response) * 0.5)
     await update.message.reply_text(response, parse_mode=ParseMode.MARKDOWN)
 
-    # Всегда переходим в CTA после ответа на TEASE
     await asyncio.sleep(2.0)
-    await context.bot.send_chat_action(chat_id, "typing")
-    await asyncio.sleep(1.0)
     await _send_cta(context.bot, user_id, chat_id, lang, interest, geo)
 
 
-# ════════════════════════════════════════════════════════════════════════════
-#  CTA handler
-# ════════════════════════════════════════════════════════════════════════════
 async def _handle_cta(update, context, user_id, lang, interest, geo, user_text):
-    """
-    Пользователь написал на CTA этапе.
-    Обрабатываем возражение. Кнопку напоминаем раз в 3 сообщения.
-    """
-    chat_id  = update.effective_chat.id
-    history  = get_ai_history(user_id)
-    user     = get_user(user_id)
-    psychotype, objections, used_techniques = _prepare_context(user_id, user_text)
-    profile  = get_profile(user_id)
+    """Пользователь написал на CTA — обрабатываем. Кнопку повторяем раз в 3 сообщения."""
+    chat_id    = update.effective_chat.id
+    history    = get_ai_history(user_id)
+    user       = get_user(user_id)
+    psychotype, objections = _prepare_context(user_id, user_text)[0], get_objections(user_id)
+    profile    = get_profile(user_id)
 
     await context.bot.send_chat_action(chat_id, "typing")
-    response, _, _, technique_used = await ask_valeria(
-        user_message=user_text, history=history, lang=lang, interest=interest,
-        funnel_stage="cta", psychotype=psychotype, objections=objections,
-        used_techniques=used_techniques, geo=geo, user_profile=profile)
+    result = await ask_valeria_conversational(
+        user_message=user_text, history=history, lang=lang,
+        interest=interest, geo=geo, funnel_stage="warming",
+        psychotype=psychotype, user_profile=profile, objections=objections)
 
-    if technique_used: log_technique(user_id, technique_used)
+    response = result["text"]
     add_ai_message(user_id, "user", user_text)
     add_ai_message(user_id, "assistant", response)
     add_tone(user_id, detect_tone(user_text, history))
@@ -779,7 +518,6 @@ async def _handle_cta(update, context, user_id, lang, interest, geo, user_text):
     await asyncio.sleep(_typing_delay(response) * 0.5)
     await update.message.reply_text(response, parse_mode=ParseMode.MARKDOWN)
 
-    # Кнопку напоминаем раз в 3 сообщения — не спамим
     if cta_replies % 3 == 0:
         await asyncio.sleep(2.0)
         await _send_cta(context.bot, user_id, chat_id, lang, interest, geo)
@@ -898,17 +636,6 @@ async def _handle_ai_chat(update, context, user_id, lang, interest, geo, user_te
     await update.message.reply_text(response, parse_mode=ParseMode.MARKDOWN)
 
 
-
-
-def _is_fallback_response(response: str, lang: str) -> bool:
-    fallback_starts = [
-        "There are patterns in how lines move",
-        "Hay patrones en cómo se mueven",
-        "Postoje obrasci u tome kako se kvote",
-        "Yra modeliai kaip koeficientai",
-        "Ir modeļi kā koeficienti",
-    ]
-    return any(response.strip().startswith(s) for s in fallback_starts)
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -1203,10 +930,6 @@ def main():
     app.add_handler(CommandHandler("admin_fetch_ids", admin_fetch_ids))
     app.add_handler(CommandHandler("admin_ab",        admin_ab_stats))
 
-    app.add_handler(CallbackQueryHandler(lang_chosen,       pattern=r"^lang_"))
-    app.add_handler(CallbackQueryHandler(interest_chosen,   pattern=r"^int_"))
-    app.add_handler(CallbackQueryHandler(geo_chosen,        pattern=r"^geo_"))
-    app.add_handler(CallbackQueryHandler(commitment_chosen, pattern=r"^cm_"))
     app.add_handler(CallbackQueryHandler(user_joined,       pattern=r"^user_joined$"))
     app.add_handler(CallbackQueryHandler(calc_deposit_chosen, pattern=r"^calc_dep_"))
     app.add_handler(CallbackQueryHandler(calc_stake_chosen,   pattern=r"^calc_stake_"))
@@ -1218,7 +941,9 @@ def main():
     app.job_queue.run_repeating(daily_signal_job,    interval=60*60,  first=300)   # каждый час, проверяет таймзону
     app.job_queue.run_repeating(adrenaline_check_job,interval=15*60,  first=180)   # каждые 15 мин
 
-    logger.info("OddsVault Bot v10 🚀  Valeria is online.")
+    logger.info("OddsVault Bot v14 🚀  Valeria is online.")
+    logger.info(f"Jobs registered: reengage(30m) / silence_push(1h) / daily_signal(1h) / adrenaline(15m)")
+    logger.info(f"Scenarios active: S1-S21 | Modules: conversation + ftd_onboarding + scenarios + daily_signal + adrenaline")
     app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
