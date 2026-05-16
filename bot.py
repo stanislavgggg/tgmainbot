@@ -451,14 +451,20 @@ async def _handle_warming(update, context, user_id, lang, interest, geo, user_te
     await asyncio.sleep(_typing_delay(response) * 0.5)
     await update.message.reply_text(response, parse_mode=ParseMode.MARKDOWN)
 
-    # Переход к tease — только по сигналу AI, без жёсткого счётчика реплик.
-    # AI сам чувствует момент: скептик — 8 обменов, любопытный — 3.
-    # Единственные условия: interest определён + минимум 2 реплики (не прыгаем сразу).
-    interest_known = bool(user.get("interest_confirmed") or interest not in (None, "betting"))
-    if result["move_to_tease"] and interest_known and replies >= 2:
+    # Tease trigger — AI решает когда момент настал.
+    # Минимум 1 реплика. Intent детектируется AI — работает на любом языке.
+    interest_known = bool(
+        result["detected_interest"] or
+        user.get("interest_confirmed") or
+        interest not in (None, "betting")
+    )
+
+    should_tease = result["move_to_tease"] and interest_known and replies >= 1
+
+    if should_tease:
         await asyncio.sleep(3.0)
         fresh = get_user(user_id)
-        if fresh.get("stage_replies", 0) == replies:  # пользователь не написал новое
+        if fresh.get("stage_replies", 0) == replies:
             await _send_tease(context.bot, user_id, chat_id, lang, interest,
                               geo=geo, job_queue=context.job_queue)
 
