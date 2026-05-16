@@ -1041,6 +1041,11 @@ async def subscribed_push_job(context: ContextTypes.DEFAULT_TYPE):
             logger.error(f"Silence push error [{user_id}]: {e}")
 
 
+async def admin_products(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    from product_selector import format_products_message
+    await update.message.reply_text(format_products_message(), parse_mode=ParseMode.MARKDOWN)
+
+
 # ════════════════════════════════════════════════════════════════════════════
 #  Entry point
 # ════════════════════════════════════════════════════════════════════════════
@@ -1062,6 +1067,7 @@ def main():
     app.add_handler(CommandHandler("debug",           debug_command))
     app.add_handler(CommandHandler("admin_fetch_ids", admin_fetch_ids))
     app.add_handler(CommandHandler("admin_ab",        admin_ab_stats))
+    app.add_handler(CommandHandler("admin_products",  admin_products))
 
     app.add_handler(CallbackQueryHandler(user_joined,         pattern=r"^user_joined$"))
     app.add_handler(CallbackQueryHandler(calc_deposit_chosen, pattern=r"^calc_dep_"))
