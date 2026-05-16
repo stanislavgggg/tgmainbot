@@ -283,7 +283,10 @@ async def user_joined(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=_cta_keyboard(lang, interest, geo))
         return
 
-    update_user(user_id, state=State.AI_CHAT, funnel_stage="subscribed", verified_member=True)
+    # Fix: сбрасываем ai_msg_count при подписке — иначе юзер попадает в step3/4
+    # вместо step1 если до подписки что-то писал в warming
+    update_user(user_id, state=State.AI_CHAT, funnel_stage="subscribed",
+                verified_member=True, ai_msg_count=0, onboarding_barrier="unknown")
     await context.bot.send_chat_action(chat_id, "typing")
     await asyncio.sleep(1.5)
 
@@ -348,10 +351,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif state == State.CTA:
         await _handle_cta(update, context, user_id, lang, interest, geo, user_text)
     elif state in (State.AI_CHAT, State.SUBSCRIBED):
-        if detect_ftd_signal(user_text):
+        if detect_ftd_signal(user_text) and not user.get("ftd_done"):
             ftd_count = user.get("ftd_count", 0) + 1
             update_user(user_id, ftd_done=True, ftd_count=ftd_count)
             logger.info(f"FTD #{ftd_count} → {user_id}")
+            # Re-read user so _handle_ai_chat sees ftd_done=True → POST-FTD path
+            # без этого ftd_celebration_job и PRE-FTD ответ идут одновременно
+            user = get_user(user_id)
             schedule_ftd_flow(context.job_queue, user_id,
                               update.effective_chat.id, lang, interest)
         await _handle_ai_chat(update, context, user_id, lang, interest, geo, user_text, user)
