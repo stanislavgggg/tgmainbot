@@ -167,6 +167,8 @@ async def _send_cta(bot, user_id, chat_id, lang, interest, geo):
 # ════════════════════════════════════════════════════════════════════════════
 HOOK_IMAGE_PATH = os.path.join(os.path.dirname(__file__), "1name.png")
 HOOK_IMAGE_URL  = "https://raw.githubusercontent.com/stanislavgggg/tgmainbot/4891019e49ee730aad0db5bcd065708a1b44c471/1name.png"
+WELCOME_IMAGE_PATH = os.path.join(os.path.dirname(__file__), "welcome_subscribed.png")
+WELCOME_IMAGE_URL  = "https://raw.githubusercontent.com/stanislavgggg/tgmainbot/1e916335c4d9b7c4e6bc93ccc2377321f8484b39/ChatGPT%20Image%20May%2016%2C%202026%2C%2004_25_15%20PM.png"
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id    = update.effective_user.id
@@ -289,6 +291,22 @@ async def user_joined(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 verified_member=True, ai_msg_count=0, onboarding_barrier="unknown")
     await context.bot.send_chat_action(chat_id, "typing")
     await asyncio.sleep(1.5)
+
+    # Welcome image — отправляем картинку при подтверждении подписки
+    welcome_sent = False
+    if os.path.exists(WELCOME_IMAGE_PATH):
+        try:
+            with open(WELCOME_IMAGE_PATH, "rb") as photo:
+                await context.bot.send_photo(chat_id=chat_id, photo=photo)
+            welcome_sent = True
+        except TelegramError as e:
+            logger.warning(f"Welcome photo file failed: {e}")
+    if not welcome_sent:
+        try:
+            await context.bot.send_photo(chat_id=chat_id, photo=WELCOME_IMAGE_URL)
+            welcome_sent = True
+        except TelegramError as e:
+            logger.warning(f"Welcome photo URL failed: {e}")
 
     # CRO #4: передаём ab_variant для A/B теста post-sub онбординга
     ab_variant = user.get("ab_variant", "A")
